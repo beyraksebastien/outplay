@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using OutplayOverlay.Telemetry;
 
 namespace OutplayOverlay;
@@ -18,6 +19,20 @@ public partial class MainWindow : Window
         _hub.StartAll();
 
         Closed += (_, _) => _hub.Dispose();
+
+        // Some games re-grab topmost/focus even in windowed/borderless mode.
+        // Note: this cannot beat exclusive Fullscreen — no overlay can render
+        // over that, since it bypasses the desktop compositor. Use Borderless
+        // or Windowed mode in the game's display settings.
+        var reassertTopmost = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        reassertTopmost.Tick += (_, _) =>
+        {
+            if (!Topmost)
+            {
+                Topmost = true;
+            }
+        };
+        reassertTopmost.Start();
     }
 
     private void OnConnectionChanged(string sim, bool connected)
