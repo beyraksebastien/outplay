@@ -223,7 +223,7 @@ public sealed class ScreenDeltaReader : IDisposable
     private static Pix ConvertToPix(Bitmap bitmap)
     {
         using var stream = new MemoryStream();
-        bitmap.Save(stream, ImageFormat.Png);
+        bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
         return Pix.LoadFromMemory(stream.ToArray());
     }
 
