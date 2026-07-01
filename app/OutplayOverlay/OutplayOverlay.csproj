@@ -9,6 +9,12 @@
     <AssemblyName>OutplayOverlay</AssemblyName>
     <ApplicationIcon />
     <Platforms>x64</Platforms>
+
+    <!-- Publish-only settings (no effect on normal `dotnet build`/`dotnet run`). Bundles native
+         SQLite interop libraries into the single-file exe instead of leaving them as loose files
+         next to it - required for PublishSingleFile to actually produce ONE file given
+         Microsoft.Data.Sqlite ships a native dependency, not just managed code. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>
