@@ -2,11 +2,13 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using OutplayOverlay.Telemetry;
-// Disambiguates against System.Drawing.Color/FontFamily and System.Windows.Forms.HorizontalAlignment,
-// all implicitly in scope project-wide now that UseWindowsForms=true is set alongside UseWPF=true.
+// Disambiguates against System.Drawing.Color/FontFamily/Brushes and
+// System.Windows.Forms.HorizontalAlignment, all implicitly in scope project-wide now that
+// UseWindowsForms=true is set alongside UseWPF=true.
 using Color = System.Windows.Media.Color;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using FontFamily = System.Windows.Media.FontFamily;
+using Brushes = System.Windows.Media.Brushes;
 
 namespace OutplayOverlay;
 
