@@ -97,6 +97,13 @@
             </Grid>
             </StackPanel>
 
+            <!-- Trends: opens the cross-session TrendsWindow. Sits left of the gear icon, same
+                 corner-of-the-panel treatment. -->
+            <Button x:Name="TrendsButton" Content="📈" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Width="20" Height="20" Padding="0" FontSize="12" Margin="0,0,24,0"
+                    Background="Transparent" BorderThickness="0" Foreground="Gray"
+                    Cursor="Hand" Click="TrendsButton_Click"/>
+
             <!-- Settings gear: opens the OCR-fallback flyout. Kept out of the flow of the main
                  coaching/telemetry StackPanel so it just sits in the corner of the panel. -->
             <ToggleButton x:Name="GearButton" Content="⚙" HorizontalAlignment="Right" VerticalAlignment="Top"

@@ -66,6 +66,33 @@
 
                 <Border BorderBrush="#333" BorderThickness="0,0,0,1" Margin="0,0,0,10"/>
 
+                <!-- SEGMENTS: distance-based, approximate corner breakdown (CornerIntelligenceEngine).
+                     F1 25 gets a visibly muted/dashed rendering + amber disclaimer instead of the
+                     iRacing heat-color treatment, since its per-segment attribution is much coarser. -->
+                <StackPanel Margin="0,0,0,10">
+                    <TextBlock Text="SEGMENTS (12, distance-based — approximate, not real corners)"
+                               Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold" Margin="0,0,0,4"/>
+
+                    <TextBlock x:Name="F125DisclaimerText"
+                               Text="F1 25 delta-to-best only updates once per lap, so per-segment attribution below is coarse — treat as a rough hint, not a precise readout."
+                               Foreground="Goldenrod" FontFamily="Consolas" FontSize="10" TextWrapping="Wrap"
+                               Margin="0,0,0,4" Visibility="Collapsed"/>
+
+                    <TextBlock x:Name="WorstSegmentText" Text="Worst segment: -- (not enough data)"
+                               Foreground="Gray" FontFamily="Consolas" FontSize="11" Margin="0,0,0,6"/>
+
+                    <UniformGrid x:Name="SegmentCellsPanel" Rows="1" Columns="12" HorizontalAlignment="Left"/>
+
+                    <StackPanel x:Name="LegendPanel" Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBlock Text="░ &lt;0.05s lost" Foreground="Gray" FontFamily="Consolas" FontSize="9" Margin="0,0,10,0"/>
+                        <TextBlock Text="▒ 0.05–0.15s" Foreground="Gray" FontFamily="Consolas" FontSize="9" Margin="0,0,10,0"/>
+                        <TextBlock Text="▓ 0.15–0.30s" Foreground="Gray" FontFamily="Consolas" FontSize="9" Margin="0,0,10,0"/>
+                        <TextBlock Text="█ &gt;0.30s" Foreground="Gray" FontFamily="Consolas" FontSize="9"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <Border BorderBrush="#333" BorderThickness="0,0,0,1" Margin="0,0,0,10"/>
+
                 <!-- What went well / What to work on -->
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>

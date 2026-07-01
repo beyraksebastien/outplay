@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -18,13 +19,25 @@ public partial class RaceDebriefWindow : Window
     // for a binary tight/loose color split here without inventing a third bucket.
     private const double ConsistencyTightThresholdSec = 0.5;
 
-    public RaceDebriefWindow(SessionSummary summary)
+    // SEGMENTS heat colors (iRacing case, higher-confidence DeltaToBest signal): four buckets by
+    // TimeLossSec, gray-to-OrangeRed gradient — darker/neutral for negligible loss, saturating to
+    // OrangeRed for the worst bucket. Documented here since these thresholds/colors are a judgment
+    // call, not something CornerIntelligenceEngine itself specifies.
+    private static readonly (double MaxSec, Brush Brush)[] SegmentHeatBuckets =
+    {
+        (0.05, new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44))),   // <0.05s lost
+        (0.15, new SolidColorBrush(Color.FromRgb(0x8A, 0x6D, 0x3A))),   // 0.05-0.15s
+        (0.30, new SolidColorBrush(Color.FromRgb(0xC1, 0x5A, 0x2E))),   // 0.15-0.30s
+        (double.MaxValue, new SolidColorBrush(Color.FromRgb(0xE0, 0x38, 0x1A))), // >0.30s
+    };
+
+    public RaceDebriefWindow(SessionSummary summary, SessionCornerReport? cornerReport = null)
     {
         InitializeComponent();
-        Render(summary);
+        Render(summary, cornerReport);
     }
 
-    private void Render(SessionSummary summary)
+    private void Render(SessionSummary summary, SessionCornerReport? cornerReport)
     {
         TitleText.Text = $"RACE DEBRIEF — {summary.Sim}";
         SubtitleText.Text =
@@ -41,9 +54,86 @@ public partial class RaceDebriefWindow : Window
         ContentPanel.Visibility = Visibility.Visible;
 
         RenderStatStrip(summary);
+        RenderSegments(summary, cornerReport);
         RenderBulletColumn(PositivesPanel, summary.Positives, Brushes.LimeGreen);
         RenderBulletColumn(ImprovementsPanel, summary.Improvements, Brushes.Goldenrod);
         RenderLapTable(summary);
+    }
+
+    /// <summary>
+    /// SEGMENTS section: distance-based, approximate corner breakdown from CornerIntelligenceEngine.
+    /// F1_25 gets a visibly lower-confidence rendering (muted/dashed cells, amber disclaimer) since
+    /// its DeltaToBestSec only updates once per lap — see SegmentStats.TimeLossSec's doc comment.
+    /// </summary>
+    private void RenderSegments(SessionSummary summary, SessionCornerReport? cornerReport)
+    {
+        var isF125 = summary.Sim == "F1_25";
+        F125DisclaimerText.Visibility = isF125 ? Visibility.Visible : Visibility.Collapsed;
+
+        if (cornerReport is null || cornerReport.AggregatedBySegment.Count == 0)
+        {
+            WorstSegmentText.Text = "Worst segment: -- (not enough data)";
+            WorstSegmentText.Foreground = Brushes.Gray;
+            SegmentCellsPanel.Children.Clear();
+            LegendPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        LegendPanel.Visibility = isF125 ? Visibility.Collapsed : Visibility.Visible;
+
+        if (cornerReport.WorstSegmentIndex is int worstIndex)
+        {
+            var worstStats = cornerReport.AggregatedBySegment.First(s => s.SegmentIndex == worstIndex);
+            var lossText = worstStats.TimeLossSec is float loss ? $"{loss:F2}s" : "--";
+            WorstSegmentText.Text = isF125
+                ? $"Worst segment: #{worstIndex + 1} (approximate) · lap-boundary segment, low confidence"
+                : $"Worst segment: #{worstIndex + 1} · lost {lossText} on average";
+            WorstSegmentText.Foreground = isF125 ? Brushes.Goldenrod : Brushes.White;
+        }
+        else
+        {
+            WorstSegmentText.Text = "Worst segment: -- (not enough data)";
+            WorstSegmentText.Foreground = Brushes.Gray;
+        }
+
+        SegmentCellsPanel.Children.Clear();
+        for (var i = 0; i < CornerIntelligenceEngine.SegmentCount; i++)
+        {
+            var index = i;
+            var stats = cornerReport.AggregatedBySegment.FirstOrDefault(s => s.SegmentIndex == index);
+
+            var cell = new Border
+            {
+                Width = 20,
+                Height = 20,
+                Margin = new Thickness(2, 0, 2, 0),
+            };
+
+            if (isF125)
+            {
+                // Muted/dashed treatment: lighter border, gray fill, no heat color — visibly lower
+                // confidence than the iRacing case, per the approved mockup.
+                cell.Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2A));
+                cell.BorderBrush = Brushes.Gray;
+                cell.BorderThickness = new Thickness(1);
+            }
+            else
+            {
+                cell.Background = stats is not null ? BucketBrush(stats.TimeLossSec) : new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2A));
+            }
+
+            SegmentCellsPanel.Children.Add(cell);
+        }
+    }
+
+    private static Brush BucketBrush(float? timeLossSec)
+    {
+        if (timeLossSec is not float loss || loss < 0) loss = 0;
+        foreach (var (maxSec, brush) in SegmentHeatBuckets)
+        {
+            if (loss < maxSec) return brush;
+        }
+        return SegmentHeatBuckets[^1].Brush;
     }
 
     private void RenderStatStrip(SessionSummary summary)
@@ -225,7 +315,9 @@ public partial class RaceDebriefWindow : Window
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    private static string FormatLapTime(float lapTimeSec)
+    /// <summary>Internal (not private) so other windows in this app — e.g. TrendsWindow — can
+    /// reuse the exact same m:ss.fff formatting instead of reimplementing it.</summary>
+    internal static string FormatLapTime(float lapTimeSec)
     {
         var minutes = (int)(lapTimeSec / 60);
         var seconds = lapTimeSec - minutes * 60;

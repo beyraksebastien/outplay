@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     private readonly TelemetryHub _hub = new();
     private readonly CoachEngine _coach;
     private readonly SessionLogger _sessionLogger;
+    private readonly CornerIntelligenceEngine _cornerIntel;
     private readonly SpeechSynthesizer _speech = new();
     private string? _activeSim;
     private PushHoldState? _lastSpokenState;
@@ -22,6 +23,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan MinTimeBetweenSpeech = TimeSpan.FromSeconds(2);
     private ScreenDeltaReading? _lastScreenDeltaReading;
     private SessionSummary? _latestSummary;
+    private SessionCornerReport? _latestCornerReport;
 
     public MainWindow()
     {
@@ -57,12 +59,15 @@ public partial class MainWindow : Window
         _sessionLogger = new SessionLogger(_hub);
         _sessionLogger.SummaryReady += OnSummaryReady;
 
+        _cornerIntel = new CornerIntelligenceEngine(_hub);
+
         _hub.StartAll();
 
         Closed += (_, _) =>
         {
             _coach.Dispose();
             _sessionLogger.Dispose();
+            _cornerIntel.Dispose();
             _hub.Dispose();
             _speech.Dispose();
         };
@@ -257,6 +262,10 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             _latestSummary = summary;
+            // Built at the same moment the summary is captured, so the debrief's SEGMENTS section
+            // reflects the session that just ended (BuildSessionReport is a cheap in-memory
+            // aggregation over CornerIntelligenceEngine's already-accumulated completed laps).
+            _latestCornerReport = _cornerIntel.BuildSessionReport();
             DebriefPill.Visibility = Visibility.Visible;
         });
     }
@@ -265,8 +274,14 @@ public partial class MainWindow : Window
     {
         if (_latestSummary is null) return;
         DebriefPill.Visibility = Visibility.Collapsed;
-        var debrief = new RaceDebriefWindow(_latestSummary) { Owner = this };
+        var debrief = new RaceDebriefWindow(_latestSummary, _latestCornerReport) { Owner = this };
         debrief.Show();
+    }
+
+    private void TrendsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var trends = new TrendsWindow { Owner = this };
+        trends.Show();
     }
 
     private void GearButton_Click(object sender, RoutedEventArgs e)

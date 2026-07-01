@@ -7,7 +7,10 @@ namespace OutplayOverlay.Telemetry;
 /// <summary>
 /// Reads F1 25 telemetry via the game's UDP broadcast (Settings > Telemetry Settings > UDP Telemetry: On,
 /// UDP Format: 2024 — the 2025 default format is not implemented here). Default port 20777.
-/// Parses PacketCarTelemetryData (id 6), PacketLapData (id 2), and PacketCarStatusData (id 7).
+/// Parses PacketCarTelemetryData (id 6), PacketLapData (id 2), PacketCarStatusData (id 7),
+/// PacketSessionData (id 1, trackLength only), and PacketSessionHistoryData (id 11, best-lap time
+/// only) — the last of these is what powers a real (end-of-lap, not continuous) DeltaToBestSec;
+/// see ParseSessionHistory's doc comment for the full design rationale.
 ///
 /// PRD §14.6: re-validate the exact packet layout against the shipped F1 25 build before relying on this
 /// in production — EA/Codemasters have changed byte layouts between seasons, and the struct offsets below
@@ -37,6 +40,33 @@ public sealed class F125TelemetrySource : ITelemetrySource
     private const byte CarStatusPacketId = 7;
     private const int CarStatusSize = 55; // bytes per car — see field-by-field read in ParseCarStatus
 
+    // --- Session packet (id 1) ---
+    // UNVERIFIED (but low risk relative to the other packets here): only used to grab
+    // m_trackLength, which is one of the first few fields in the struct per the public F1 24/25
+    // spec: uint8 weather, int8 trackTemperature, int8 airTemperature, uint8 totalLaps,
+    // uint16 trackLength, ... We stop reading immediately after trackLength since nothing else
+    // in this packet is needed. Low field-count-before-target keeps the mis-offset risk small
+    // compared to e.g. Session History below.
+    private const byte SessionPacketId = 1;
+
+    // --- Session History packet (id 11) ---
+    // UNVERIFIED, HIGH RISK: struct layout transcribed from the public F1 24 UDP telemetry spec
+    // (F1 25 not independently confirmed). Per the spec:
+    //   uint8 carIdx, uint8 numLaps, uint8 numTyreStints,
+    //   uint8 bestLapTimeLapNum, uint8 bestSector1LapNum, uint8 bestSector2LapNum, uint8 bestSector3LapNum,
+    //   LapHistoryData lapHistoryData[100]  (14 bytes each: uint32 lapTimeInMS,
+    //       uint16 sector1TimeMSPart, uint8 sector1TimeMinutesPart,
+    //       uint16 sector2TimeMSPart, uint8 sector2TimeMinutesPart,
+    //       uint16 sector3TimeMSPart, uint8 sector3TimeMinutesPart, uint8 lapValidBitFlags),
+    //   TyreStintHistoryData tyreStintsHistoryData[8] (3 bytes each — not read here).
+    // Unlike Lap Data/Car Status/Car Telemetry, this packet carries data for ONE car per packet
+    // (cycled by the game across frames), identified by its own m_carIdx field — NOT indexed by
+    // playerCarIndex from the shared header. If m_carIdx doesn't match the player's car this
+    // tick, the packet is simply skipped (their turn will come around again).
+    private const byte SessionHistoryPacketId = 11;
+    private const int LapHistoryEntrySize = 14;
+    private const int MaxLapHistoryEntries = 100;
+
     private UdpClient? _client;
     private CancellationTokenSource? _cts;
     private bool _connected;
@@ -60,6 +90,15 @@ public sealed class F125TelemetrySource : ITelemetrySource
     private string? _carAheadTireCompound;
     private float? _currentLapTimeSec;
     private byte[]? _tyreCompoundByCarIndex; // most recent Car Status snapshot, index = car index
+
+    // --- Real (if coarse) delta-to-best state, see Feature 1 remarks on ParseSessionHistory /
+    // ParseLapData / the "end-of-lap delta" design decision below. All plain field reads/writes
+    // on the UDP listen-loop thread — no locking, no I/O, stays well under the hot-path budget.
+    private float? _trackLengthM;              // from Session packet (id 1), for LapDistancePct
+    private uint? _bestLapTimeMs;              // player's best completed lap this session, from Session History (id 11)
+    private uint? _lastSeenLastLapTimeMs;      // most recent Lap Data "lastLapTimeInMS" value seen (used to detect a new completed lap)
+    private float? _endOfLapDeltaToBestSec;    // held constant between lap completions; see design note
+    private float? _lapDistancePctF1;          // derived from lapDistance / trackLength, F1 25 only
 
     public event Action<TelemetrySample>? SampleReceived;
     public event Action<bool>? ConnectionChanged;
@@ -161,17 +200,93 @@ public sealed class F125TelemetrySource : ITelemetrySource
 
         switch (packetId)
         {
+            case SessionPacketId:
+                ParseSession(buffer, reader, ms);
+                return;
             case LapDataPacketId:
                 ParseLapData(buffer, reader, ms, playerCarIndex);
                 return;
             case CarStatusPacketId:
                 ParseCarStatus(buffer, ms, playerCarIndex);
                 return;
+            case SessionHistoryPacketId:
+                ParseSessionHistory(buffer, reader, ms, playerCarIndex);
+                return;
             case CarTelemetryPacketId:
                 ParseCarTelemetryAndEmit(buffer, reader, ms, playerCarIndex);
                 return;
             default:
                 return;
+        }
+    }
+
+    /// <summary>
+    /// PacketSessionData (id 1). Only reads m_trackLength (uint16, metres) — needed to turn F1
+    /// 25's lapDistance (metres into the current lap, from Lap Data) into a 0..1 LapDistancePct
+    /// comparable to iRacing's LapDistPct. UNVERIFIED field order/offsets against a live F1 25
+    /// capture, but this is one of the lowest-risk offsets in this file (only 4 single-byte
+    /// fields precede it).
+    /// </summary>
+    private void ParseSession(byte[] buffer, BinaryReader reader, MemoryStream ms)
+    {
+        var offset = HeaderSize;
+        if (buffer.Length < offset + 6) return;
+
+        ms.Position = offset;
+        reader.ReadByte();  // weather
+        reader.ReadSByte(); // trackTemperature
+        reader.ReadSByte(); // airTemperature
+        reader.ReadByte();  // totalLaps
+        var trackLength = reader.ReadUInt16(); // metres
+        // Remaining Session fields not needed for this task — stop reading.
+
+        _trackLengthM = trackLength > 0 ? trackLength : null;
+    }
+
+    /// <summary>
+    /// PacketSessionHistoryData (id 11). See the field-layout comment on
+    /// <see cref="SessionHistoryPacketId"/> above for the transcribed (UNVERIFIED) struct.
+    ///
+    /// This packet is per-car (m_carIdx identifies which car it describes), not indexed by the
+    /// shared header's playerCarIndex, so we bail out if it's not currently describing the
+    /// player's car.
+    ///
+    /// FEATURE 1 DESIGN NOTE — what this actually gives us: m_bestLapTimeLapNum is a 1-based lap
+    /// number (0 = "no valid best lap yet this session") indexing into m_lapHistoryData for the
+    /// player's best completed lap. We only need that lap's total m_lapTimeInMS — we deliberately
+    /// do NOT attempt to reconstruct sector splits or do distance-interpolated math here (see the
+    /// end-of-lap-only design note on ParseLapData below for why).
+    /// </summary>
+    private void ParseSessionHistory(byte[] buffer, BinaryReader reader, MemoryStream ms, byte playerCarIndex)
+    {
+        var bodyOffset = HeaderSize;
+        // Minimum bytes needed to read the fixed header fields of this packet.
+        if (buffer.Length < bodyOffset + 7) return;
+
+        ms.Position = bodyOffset;
+        var carIdx = reader.ReadByte();
+        if (carIdx != playerCarIndex) return; // this packet describes a different car's history this tick
+
+        reader.ReadByte(); // numLaps
+        reader.ReadByte(); // numTyreStints
+        var bestLapTimeLapNum = reader.ReadByte(); // 1-based, 0 = no valid best lap yet
+        reader.ReadByte(); // bestSector1LapNum
+        reader.ReadByte(); // bestSector2LapNum
+        reader.ReadByte(); // bestSector3LapNum
+
+        if (bestLapTimeLapNum == 0) return; // no best lap yet this session — leave _bestLapTimeMs as-is (null)
+        if (bestLapTimeLapNum > MaxLapHistoryEntries) return; // defensive: out-of-range would indicate a mis-parsed offset
+
+        var lapHistoryArrayStart = bodyOffset + 7;
+        var entryOffset = lapHistoryArrayStart + (bestLapTimeLapNum - 1) * LapHistoryEntrySize;
+        if (buffer.Length < entryOffset + 4) return;
+
+        ms.Position = entryOffset;
+        var bestLapTimeMs = reader.ReadUInt32(); // m_lapTimeInMS for the best lap — no need to read sector fields
+
+        if (bestLapTimeMs > 0)
+        {
+            _bestLapTimeMs = bestLapTimeMs;
         }
     }
 
@@ -210,13 +325,18 @@ public sealed class F125TelemetrySource : ITelemetrySource
             SlipAngle = null, // not exposed by F1 25 telemetry — PRD §13.2
             TireTempC = tyreSurfaceTemp,
             TireWearPct = null, // requires Car Damage packet (id 10) — out of scope for this task
-            LapDistancePct = null, // requires track length from the Session packet (id 1) — out of scope
+            LapDistancePct = _lapDistancePctF1, // now wired from Lap Data lapDistance / Session trackLength
             CurrentLapTimeSec = _currentLapTimeSec,
-            // DeltaToBestSec is null for F1 25 by default (see the CODE-CRITIC FIX remark in
-            // ParseLapData below for why we stopped fabricating a value from lap-time packets).
-            // The one exception: a currently-succeeding OCR read of the in-game HUD delta via
-            // ScreenDeltaReader, which is opt-in and treated as "no data" the instant it fails.
-            DeltaToBestSec = _lastScreenDeltaSucceeded ? _lastScreenDeltaSec : null,
+            // FEATURE 1 — OCR-vs-telemetry priority: OCR (ScreenDeltaReader), when enabled and
+            // currently succeeding, is finer-grained (reads the game's own continuously-updating
+            // HUD delta, 4Hz) than the real-telemetry signal below, which only updates once per
+            // lap (see ParseLapData). So OCR is treated as an override that takes priority when
+            // it's actively working; the telemetry-based end-of-lap delta is the baseline that's
+            // always there (no calibration, no OCR fragility) and is what's used whenever OCR is
+            // disabled, not yet calibrated, or its most recent read failed. The two are never
+            // blended/averaged — that would produce a value that means neither "this instant" nor
+            // "at the last lap line," which is worse than picking one clearly-defined source.
+            DeltaToBestSec = _lastScreenDeltaSucceeded ? _lastScreenDeltaSec : _endOfLapDeltaToBestSec,
             GapToCarAheadSec = _gapToCarAheadSec,
             PlayerTireCompound = _playerTireCompound,
             CarAheadTireCompound = _carAheadTireCompound,
@@ -242,14 +362,12 @@ public sealed class F125TelemetrySource : ITelemetrySource
     ///   uint16 pitStopTimerInMS, uint8 pitStopShouldServePen,
     ///   float speedTrapFastestSpeed, uint8 speedTrapFastestLap  == 57 bytes.
     ///
-    /// IMPORTANT (flagged risk): the task brief describes this packet as containing a direct
-    /// "personal-best delta" field. The public spec (as far as I can verify without a live
-    /// capture) does NOT have such a field — only deltaToCarInFront and deltaToRaceLeader.
-    /// DeltaToBestSec below is therefore an approximation (current lap time vs. the best
-    /// completed lap time seen so far this session), not a true live delta-to-best like
-    /// iRacing's LapDeltaToBest. Getting a real delta-to-best requires stitching in
-    /// PacketSessionHistoryData (id 11) for the personal-best lap/sector times — out of scope
-    /// for this task; flagged in the report as a follow-up.
+    /// IMPORTANT (flagged risk, updated for Feature 1): this packet does NOT contain a direct
+    /// "personal-best delta" field — only deltaToCarInFront and deltaToRaceLeader. A genuine
+    /// delta-to-best now comes from combining this packet's lastLapTimeInMS (the just-completed
+    /// lap's total time) with the player's best-lap time cached from PacketSessionHistoryData
+    /// (id 11, see ParseSessionHistory) — see the end-of-lap design note further down in this
+    /// method for exactly what that does and does not give us.
     /// </summary>
     private void ParseLapData(byte[] buffer, BinaryReader reader, MemoryStream ms, byte playerCarIndex)
     {
@@ -258,14 +376,14 @@ public sealed class F125TelemetrySource : ITelemetrySource
 
         ms.Position = playerOffset;
 
-        reader.ReadUInt32(); // lastLapTimeInMS — not consumed (see CODE-CRITIC FIX below)
+        var lastLapTimeMs = reader.ReadUInt32(); // now consumed — see Feature 1 note below
         var currentLapTimeMs = reader.ReadUInt32();
         reader.ReadUInt16(); reader.ReadByte(); // sector1 time
         reader.ReadUInt16(); reader.ReadByte(); // sector2 time
         var deltaCarFrontMsPart = reader.ReadUInt16();
         var deltaCarFrontMinPart = reader.ReadByte();
         reader.ReadUInt16(); reader.ReadByte(); // deltaToRaceLeader
-        reader.ReadSingle(); // lapDistance
+        var lapDistance = reader.ReadSingle(); // metres into current lap (can be negative pre-start-line)
         reader.ReadSingle(); // totalDistance
         reader.ReadSingle(); // safetyCarDelta
         var carPosition = reader.ReadByte(); // 1-based race position
@@ -273,27 +391,48 @@ public sealed class F125TelemetrySource : ITelemetrySource
 
         _currentLapTimeSec = currentLapTimeMs / 1000f;
 
-        // CODE-CRITIC FIX: this used to compute a "_deltaToBestSec" as
-        // (currentLapTimeMs - bestMs) / 1000f and feed it straight into
-        // TelemetrySample.DeltaToBestSec / CoachEngine's Push/Steady/BackingOff classifier.
-        // That value's slope w.r.t. wall-clock time is ~1.0 sec/sec for almost the entire lap
+        // LapDistancePct wiring (was previously hardcoded null — "requires track length from the
+        // Session packet", which packet id 1 now supplies via ParseSession). Only meaningful once
+        // a Session packet has arrived (trackLength > 0); F1 25 sends Session packets at a lower
+        // rate than Lap Data, so there can be a brief startup window where this stays null.
+        _lapDistancePctF1 = _trackLengthM is float trackLength && trackLength > 0
+            ? Math.Clamp(lapDistance / trackLength, 0f, 1f)
+            : null;
+
+        // FEATURE 1 — end-of-lap delta-to-best (real telemetry, not fabricated):
+        // lastLapTimeInMS holds the PREVIOUS completed lap's total time and only changes value
+        // once per lap (the instant a new lap is registered by the game) — it is not a per-tick
+        // counter like currentLapTimeInMS, so comparing it to the cached best-lap time from
+        // Session History (id 11) gives a genuine (if coarse) "how did that lap compare to my
+        // best" signal, not the monotonic proxy that was rejected before (see the CODE-CRITIC FIX
+        // note further down, kept for history).
+        //
+        // HONEST LIMITATION (deliberate v1 scope, not a hidden gap): this updates ONLY once per
+        // lap, at the moment the new lap is registered, and holds constant for the entire next
+        // lap. It is NOT a continuously-updating mid-lap delta like iRacing's LapDeltaToBest —
+        // sub-lap distance-relative comparison against the best lap would require sector-boundary
+        // interpolation math this packet set doesn't give us cheaply. A driver only really learns
+        // "how did that lap compare" at the line; this mirrors that, nothing more.
+        if (lastLapTimeMs > 0 && lastLapTimeMs != _lastSeenLastLapTimeMs && _bestLapTimeMs is uint bestMs)
+        {
+            _endOfLapDeltaToBestSec = (lastLapTimeMs - bestMs) / 1000f;
+        }
+        _lastSeenLastLapTimeMs = lastLapTimeMs;
+
+        // CODE-CRITIC FIX (history, kept for context): this used to compute a "_deltaToBestSec"
+        // as (currentLapTimeMs - bestMs) / 1000f and feed it straight into
+        // TelemetrySample.DeltaToBestSec / CoachEngine's Push/Steady/BackingOff classifier. That
+        // value's slope w.r.t. wall-clock time is ~1.0 sec/sec for almost the entire lap
         // (currentLapTimeMs counts up every tick while bestMs is fixed), which is ~20x over
         // CoachEngine's TrendDeadbandSecPerSec (0.05f) — so it would classify as BackingOff
-        // continuously, regardless of actual driving quality. It is a monotonic "time since
-        // start of lap minus a fixed constant" proxy, not a true relative-pace signal like
-        // iRacing's LapDeltaToBest, and CoachEngine's classifier implicitly assumes the latter.
+        // continuously, regardless of actual driving quality. That was reverted to null.
         //
-        // Decision: we deliberately do NOT compute or forward a DeltaToBestSec for F1 25 at all
-        // (TelemetrySample.DeltaToBestSec is always null for this sim — see
-        // ParseCarTelemetryAndEmit). A wrong/fabricated push-hold signal is worse than no
-        // signal (PRD §11: "bad live callouts are actively distracting"), and CoachEngine
-        // already treats a null DeltaToBestSec as "no signal" (clears history, returns Steady)
-        // with zero special-casing required in shared logic — so this keeps the sim-specific
-        // quirk isolated entirely to this adapter instead of teaching CoachEngine about F1.
-        // (A prior revision also tracked a running best-lap-so-far here as scaffolding for a
-        // future PacketSessionHistoryData-based delta-to-best; removed per code-critic review
-        // since nothing consumed it — an unused field is a maintenance trap that looks wired up
-        // when it isn't. Re-add it if/when that follow-up is actually built.)
+        // The end-of-lap _endOfLapDeltaToBestSec computed above does NOT have this problem: it's
+        // a step function (only changes once, at the lap boundary, then holds perfectly flat for
+        // the rest of the lap), so its slope is 0 for ~an entire lap and CoachEngine's trend
+        // classifier will correctly read it as Steady rather than continuous BackingOff. It is
+        // real telemetry-derived data, not a fabricated proxy — see the Feature 1 report for the
+        // honest characterization of its coarseness (one update per lap, not continuous).
 
         // Gap to car ahead: the game computes this for us per-car (deltaToCarInFront).
         _gapToCarAheadSec = deltaCarFrontMinPart * 60f + deltaCarFrontMsPart / 1000f;
