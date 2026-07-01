@@ -1,0 +1,121 @@
+<Window x:Class="OutplayOverlay.RaceDebriefWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Race Debrief"
+        Width="640" SizeToContent="Height"
+        MaxHeight="800"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        AllowsTransparency="True"
+        WindowStyle="None"
+        ResizeMode="NoResize">
+
+    <Border Background="#EE101010" BorderBrush="#444" BorderThickness="1" CornerRadius="8" Padding="16">
+        <StackPanel>
+            <Grid Margin="0,0,0,4">
+                <TextBlock x:Name="TitleText" Text="RACE DEBRIEF — iRacing" Foreground="White" FontFamily="Consolas"
+                           FontSize="14" FontWeight="Bold"/>
+                <Button Content="x" Width="22" Height="22" HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Background="Transparent" BorderThickness="0" Foreground="Gray"
+                        FontFamily="Consolas" Cursor="Hand" Click="CloseButton_Click"/>
+            </Grid>
+
+            <TextBlock x:Name="SubtitleText" Text="Session started -- · Duration --" Foreground="Gray"
+                       FontFamily="Consolas" FontSize="11" Margin="0,0,0,10"/>
+
+            <Border BorderBrush="#333" BorderThickness="0,0,0,1" Margin="0,0,0,10"/>
+
+            <!-- Edge case: no completed laps this session. -->
+            <TextBlock x:Name="NoLapsText" Text="No completed laps this session." Foreground="Gray"
+                       FontFamily="Consolas" FontSize="12" HorizontalAlignment="Center"
+                       Margin="0,20,0,20" Visibility="Collapsed"/>
+
+            <StackPanel x:Name="ContentPanel">
+                <!-- Stat strip: Best / Worst / Consistency / Trend -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="BEST LAP" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                        <TextBlock x:Name="BestLapTimeText" Text="--" Foreground="LimeGreen" FontFamily="Consolas" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock x:Name="BestLapNumberText" Text="--" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="WORST LAP" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                        <TextBlock x:Name="WorstLapTimeText" Text="--" Foreground="White" FontFamily="Consolas" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock x:Name="WorstLapNumberText" Text="--" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="CONSISTENCY" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                        <TextBlock x:Name="ConsistencyText" Text="--" Foreground="Gray" FontFamily="Consolas" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock x:Name="ConsistencySubText" Text="" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="3">
+                        <TextBlock Text="TREND" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
+                        <TextBlock x:Name="TrendText" Text="--" Foreground="Gray" FontFamily="Consolas" FontSize="16" FontWeight="Bold"/>
+                    </StackPanel>
+                </Grid>
+
+                <Border BorderBrush="#333" BorderThickness="0,0,0,1" Margin="0,0,0,10"/>
+
+                <!-- What went well / What to work on -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                        <TextBlock Text="WHAT WENT WELL" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                        <StackPanel x:Name="PositivesPanel"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="WHAT TO WORK ON" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+                        <StackPanel x:Name="ImprovementsPanel"/>
+                    </StackPanel>
+                </Grid>
+
+                <Border BorderBrush="#333" BorderThickness="0,0,0,1" Margin="0,0,0,10"/>
+
+                <TextBlock Text="LAP-BY-LAP" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold" Margin="0,0,0,6"/>
+
+                <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="50"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="60"/>
+                                <ColumnDefinition Width="60"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Text="LAP" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="2" Text="TIME" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="3" Text="DELTA" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="4" Text="BEST?" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="5" Text="THR%" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="6" Text="BRK%" Foreground="Gray" FontFamily="Consolas" FontSize="10" FontWeight="Bold"/>
+                        </Grid>
+                        <StackPanel x:Name="LapRowsPanel"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                <Button Content="Close" FontFamily="Consolas" FontSize="11"
+                        Padding="10,4" Click="CloseButton_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

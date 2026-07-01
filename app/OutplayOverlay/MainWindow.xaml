@@ -51,6 +51,19 @@
             <TextBlock x:Name="StatusText" Text="Waiting for sim..." Foreground="Orange"
                        FontFamily="Consolas" FontSize="12" Margin="0,0,0,8"/>
 
+            <!-- Debrief notification pill: hidden until SessionLogger.SummaryReady fires
+                 (see MainWindow.xaml.cs OnSummaryReady). Persists until clicked or superseded
+                 by a newer summary — no auto-hide timer. -->
+            <Border x:Name="DebriefPill" Visibility="Collapsed" Background="#33101010"
+                    BorderBrush="#444" BorderThickness="1" CornerRadius="10" Padding="8,4"
+                    Margin="0,0,0,8" Cursor="Hand" MouseLeftButtonUp="DebriefPill_Click">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="8" Height="8" Fill="LimeGreen" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="Debrief ready" Foreground="Gray" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"/>
+                    <TextBlock Text="  View" Foreground="White" FontFamily="Consolas" FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="SPEED" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
             <TextBlock x:Name="SpeedText" Text="0 km/h" Foreground="White" FontFamily="Consolas" FontSize="20" Margin="0,0,0,8"/>
 

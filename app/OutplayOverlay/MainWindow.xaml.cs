@@ -11,10 +11,12 @@ public partial class MainWindow : Window
 {
     private readonly TelemetryHub _hub = new();
     private readonly CoachEngine _coach;
+    private readonly SessionLogger _sessionLogger;
     private readonly SpeechSynthesizer _speech = new();
     private string? _activeSim;
     private PushHoldState? _lastSpokenState;
     private ScreenDeltaReading? _lastScreenDeltaReading;
+    private SessionSummary? _latestSummary;
 
     public MainWindow()
     {
@@ -27,11 +29,15 @@ public partial class MainWindow : Window
         _coach = new CoachEngine(_hub);
         _coach.SignalReceived += OnCoachingSignal;
 
+        _sessionLogger = new SessionLogger(_hub);
+        _sessionLogger.SummaryReady += OnSummaryReady;
+
         _hub.StartAll();
 
         Closed += (_, _) =>
         {
             _coach.Dispose();
+            _sessionLogger.Dispose();
             _hub.Dispose();
             _speech.Dispose();
         };
@@ -194,6 +200,25 @@ public partial class MainWindow : Window
         {
             _lastScreenDeltaReading = reading;
         });
+    }
+
+    private void OnSummaryReady(SessionSummary summary)
+    {
+        // Persists until clicked or superseded by a new summary (no auto-hide timer) — a new
+        // summary here simply overwrites the previous one and keeps the pill visible/re-shown.
+        Dispatcher.Invoke(() =>
+        {
+            _latestSummary = summary;
+            DebriefPill.Visibility = Visibility.Visible;
+        });
+    }
+
+    private void DebriefPill_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_latestSummary is null) return;
+        DebriefPill.Visibility = Visibility.Collapsed;
+        var debrief = new RaceDebriefWindow(_latestSummary) { Owner = this };
+        debrief.Show();
     }
 
     private void GearButton_Click(object sender, RoutedEventArgs e)

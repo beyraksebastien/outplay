@@ -28,6 +28,13 @@
          "tessdata" folder with eng.traineddata copied to the output directory; not wired up here
          since MSBuild content-copy config depends on how this project's build/publish is set up. -->
     <PackageReference Include="Tesseract" Version="5.2.0" />
+    <!-- Local file-based SQLite driver for session/lap persistence (SessionLogger). Chosen over
+         the PRD §8.1 Postgres suggestion because this is a local single-user Windows desktop
+         app with no server component — SQLite needs no install/server process and ships as a
+         single file under %LOCALAPPDATA%. Package name/version unverified against NuGet at
+         time of writing — flagged in report (same established-pattern caveat as the packages
+         above). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
   </ItemGroup>
 
 </Project>
