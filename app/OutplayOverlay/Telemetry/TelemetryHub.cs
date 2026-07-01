@@ -11,17 +11,12 @@ public sealed class TelemetryHub : IDisposable
     public event Action<TelemetrySample>? SampleReceived;
     public event Action<string, bool>? SourceConnectionChanged; // (simName, connected)
 
-    /// <summary>Owned here (not by F125TelemetrySource) so the frontend can reach it for
-    /// calibration/enable-toggle UI regardless of which sim source is currently active. See
-    /// ScreenDeltaReader's own doc comment for the full Region/Enable contract.</summary>
-    public ScreenDeltaReader ScreenDelta { get; } = new();
-
     public TelemetryHub()
     {
         _sources = new List<ITelemetrySource>
         {
             new IRacingTelemetrySource(),
-            new F125TelemetrySource(ScreenDelta),
+            new F125TelemetrySource(),
         };
 
         foreach (var source in _sources)
@@ -43,6 +38,5 @@ public sealed class TelemetryHub : IDisposable
     public void Dispose()
     {
         foreach (var source in _sources) source.Dispose();
-        ScreenDelta.Dispose();
     }
 }

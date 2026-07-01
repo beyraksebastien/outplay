@@ -33,8 +33,6 @@
                     <StackPanel Grid.Column="0" Orientation="Horizontal">
                         <TextBlock Text="Δ best: " Foreground="Gray" FontFamily="Consolas" FontSize="11"/>
                         <TextBlock x:Name="CoachDeltaText" Text="--" Foreground="Gray" FontFamily="Consolas" FontSize="11"/>
-                        <TextBlock x:Name="CoachOcrTagText" Text="" Foreground="Gray" FontFamily="Consolas"
-                                   FontSize="10" Margin="4,0,0,0" Visibility="Collapsed"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <TextBlock Text="gap ahead: " Foreground="Gray" FontFamily="Consolas" FontSize="11"/>
@@ -97,35 +95,11 @@
             </Grid>
             </StackPanel>
 
-            <!-- Trends: opens the cross-session TrendsWindow. Sits left of the gear icon, same
-                 corner-of-the-panel treatment. -->
+            <!-- Trends: opens the cross-session TrendsWindow. -->
             <Button x:Name="TrendsButton" Content="📈" HorizontalAlignment="Right" VerticalAlignment="Top"
-                    Width="20" Height="20" Padding="0" FontSize="12" Margin="0,0,24,0"
+                    Width="20" Height="20" Padding="0" FontSize="12" Margin="0,0,0,0"
                     Background="Transparent" BorderThickness="0" Foreground="Gray"
                     Cursor="Hand" Click="TrendsButton_Click"/>
-
-            <!-- Settings gear: opens the OCR-fallback flyout. Kept out of the flow of the main
-                 coaching/telemetry StackPanel so it just sits in the corner of the panel. -->
-            <ToggleButton x:Name="GearButton" Content="⚙" HorizontalAlignment="Right" VerticalAlignment="Top"
-                          Width="20" Height="20" Padding="0" FontSize="13"
-                          Background="Transparent" BorderThickness="0" Foreground="Gray"
-                          Cursor="Hand" Click="GearButton_Click"/>
-
-            <Popup x:Name="GearPopup" PlacementTarget="{Binding ElementName=GearButton}" Placement="Bottom"
-                   StaysOpen="False" AllowsTransparency="True" Closed="GearPopup_Closed">
-                <Border Background="#F0101010" BorderBrush="#444" BorderThickness="1" CornerRadius="6" Padding="10" Width="220">
-                    <StackPanel>
-                        <TextBlock Text="OCR Delta Fallback" Foreground="White" FontFamily="Consolas"
-                                   FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
-                        <CheckBox x:Name="OcrEnabledCheck" Content="Enabled" Foreground="White" FontFamily="Consolas"
-                                  FontSize="11" Margin="0,0,0,6" Checked="OcrEnabledCheck_Checked" Unchecked="OcrEnabledCheck_Unchecked"/>
-                        <TextBlock x:Name="OcrRegionText" Text="Region: 100,100 160x50" Foreground="Gray"
-                                   FontFamily="Consolas" FontSize="10" Margin="0,0,0,8"/>
-                        <Button x:Name="CalibrateButton" Content="Calibrate..." FontFamily="Consolas" FontSize="11"
-                                Padding="6,3" Click="CalibrateButton_Click"/>
-                    </StackPanel>
-                </Border>
-            </Popup>
         </Grid>
     </Border>
 </Window>

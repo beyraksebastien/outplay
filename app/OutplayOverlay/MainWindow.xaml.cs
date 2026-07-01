@@ -33,7 +33,6 @@ public partial class MainWindow : Window
     // announcements, not a hold-then-speak debounce window like the noisy per-tick coaching signal.
     private DateTime _lastFlagSpeechUtc = DateTime.MinValue;
     private static readonly TimeSpan MinTimeBetweenFlagSpeech = TimeSpan.FromSeconds(1);
-    private ScreenDeltaReading? _lastScreenDeltaReading;
     private SessionSummary? _latestSummary;
     private SessionCornerReport? _latestCornerReport;
 
@@ -88,7 +87,6 @@ public partial class MainWindow : Window
 
         _hub.SampleReceived += OnSample;
         _hub.SourceConnectionChanged += OnConnectionChanged;
-        _hub.ScreenDelta.DeltaRead += OnScreenDeltaRead;
 
         _coach = new CoachEngine(_hub);
         _coach.SignalReceived += OnCoachingSignal;
@@ -202,29 +200,6 @@ public partial class MainWindow : Window
                 CoachDeltaText.Foreground = Brushes.Gray;
             }
 
-            // OCR fallback status tag. Only F1 25 ever wires ScreenDelta into DeltaToBestSec
-            // (see F125TelemetrySource), so we only show the tag while F1 25 is the active sim.
-            if (!_hub.ScreenDelta.IsEnabled || _activeSim != "F1_25")
-            {
-                CoachOcrTagText.Visibility = Visibility.Collapsed;
-            }
-            else if (signal.DeltaToBestSec is null)
-            {
-                CoachOcrTagText.Visibility = Visibility.Visible;
-                CoachOcrTagText.Text = "[OCR: searching...]";
-                CoachOcrTagText.Foreground = Brushes.Gray;
-                CoachOcrTagText.ToolTip = null;
-            }
-            else
-            {
-                CoachOcrTagText.Visibility = Visibility.Visible;
-                CoachOcrTagText.Text = "[OCR]";
-                CoachOcrTagText.Foreground = Brushes.Gray;
-                var raw = _lastScreenDeltaReading?.RawText ?? "--";
-                var ts = _lastScreenDeltaReading?.TimestampUtc.ToLocalTime().ToString("HH:mm:ss.fff") ?? "--";
-                CoachOcrTagText.ToolTip = $"raw: \"{raw}\" @ {ts}";
-            }
-
             if (signal.GapToCarAheadSec is float gap)
             {
                 CoachGapText.Text = $"{gap:0.0}s";
@@ -290,14 +265,6 @@ public partial class MainWindow : Window
                     System.Diagnostics.Debug.WriteLine($"[Speech] SpeakSsmlAsync('{phrase}') failed: {ex}");
                 }
             }
-        });
-    }
-
-    private void OnScreenDeltaRead(ScreenDeltaReading reading)
-    {
-        Dispatcher.Invoke(() =>
-        {
-            _lastScreenDeltaReading = reading;
         });
     }
 
@@ -371,38 +338,6 @@ public partial class MainWindow : Window
     {
         var trends = new TrendsWindow { Owner = this };
         trends.Show();
-    }
-
-    private void GearButton_Click(object sender, RoutedEventArgs e)
-    {
-        // Initialize the flyout's checkbox/region display from current reader state every time
-        // it opens, since the user (or a calibration save) may have changed things since last open.
-        OcrEnabledCheck.IsChecked = _hub.ScreenDelta.IsEnabled;
-        UpdateRegionText();
-        GearPopup.IsOpen = GearButton.IsChecked == true;
-    }
-
-    private void GearPopup_Closed(object? sender, EventArgs e)
-    {
-        GearButton.IsChecked = false;
-    }
-
-    private void UpdateRegionText()
-    {
-        var r = _hub.ScreenDelta.Region;
-        OcrRegionText.Text = $"Region: {r.X},{r.Y} {r.Width}x{r.Height}";
-    }
-
-    private void OcrEnabledCheck_Checked(object sender, RoutedEventArgs e) => _hub.ScreenDelta.Enable();
-
-    private void OcrEnabledCheck_Unchecked(object sender, RoutedEventArgs e) => _hub.ScreenDelta.Disable();
-
-    private void CalibrateButton_Click(object sender, RoutedEventArgs e)
-    {
-        GearPopup.IsOpen = false;
-        var calibration = new CalibrationWindow(_hub.ScreenDelta) { Owner = this };
-        calibration.ShowDialog();
-        UpdateRegionText();
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

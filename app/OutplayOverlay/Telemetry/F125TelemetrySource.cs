@@ -80,15 +80,6 @@ public sealed class F125TelemetrySource : ITelemetrySource
     private CancellationTokenSource? _cts;
     private bool _connected;
 
-    // Optional screen-OCR fallback for DeltaToBestSec (see ScreenDeltaReader). Null/disabled by
-    // default — this is a fragile, opt-in side channel, not something F1 25 telemetry depends on.
-    // Only the most recent reading is kept, and it is only trusted while Success is true; a failed
-    // or stale reading must never leak into DeltaToBestSec (matches the "null = not available"
-    // pattern already used for every other optional field on TelemetrySample).
-    private readonly ScreenDeltaReader? _screenDeltaReader;
-    private float? _lastScreenDeltaSec;
-    private bool _lastScreenDeltaSucceeded;
-
     // Cached cross-packet state. Car Telemetry (id 6) arrives every physics frame and is what
     // actually triggers SampleReceived; Lap Data (id 2) and Car Status (id 7) arrive at a lower
     // rate, so we cache their latest decoded values here and merge them into whichever Car
@@ -114,29 +105,6 @@ public sealed class F125TelemetrySource : ITelemetrySource
 
     public event Action<TelemetrySample>? SampleReceived;
     public event Action<bool>? ConnectionChanged;
-
-    /// <param name="screenDeltaReader">Optional OCR-based delta-to-best fallback (see
-    /// ScreenDeltaReader). Pass null to disable this path entirely; when non-null but not yet
-    /// Enabled/calibrated by the frontend, DeltaToBestSec still stays null (safe default) until a
-    /// successful reading arrives.</param>
-    public F125TelemetrySource(ScreenDeltaReader? screenDeltaReader = null)
-    {
-        _screenDeltaReader = screenDeltaReader;
-        if (_screenDeltaReader is not null)
-        {
-            _screenDeltaReader.DeltaRead += OnScreenDeltaRead;
-        }
-    }
-
-    private void OnScreenDeltaRead(ScreenDeltaReading reading)
-    {
-        // Not locked: single producer (ScreenDeltaReader's own timer thread), single consumer
-        // (this field is only read from ParseCarTelemetryAndEmit on the UDP listen loop thread).
-        // A torn read of two floats/bools here is a non-issue — worst case is using last tick's
-        // reading one poll late, which is already the expected staleness of a 4Hz side channel.
-        _lastScreenDeltaSucceeded = reading.Success;
-        _lastScreenDeltaSec = reading.Success ? reading.DeltaSec : null;
-    }
 
     public void Start()
     {
@@ -433,16 +401,11 @@ public sealed class F125TelemetrySource : ITelemetrySource
             TireWearPct = null, // requires Car Damage packet (id 10) — out of scope for this task
             LapDistancePct = _lapDistancePctF1, // now wired from Lap Data lapDistance / Session trackLength
             CurrentLapTimeSec = _currentLapTimeSec,
-            // FEATURE 1 — OCR-vs-telemetry priority: OCR (ScreenDeltaReader), when enabled and
-            // currently succeeding, is finer-grained (reads the game's own continuously-updating
-            // HUD delta, 4Hz) than the real-telemetry signal below, which only updates once per
-            // lap (see ParseLapData). So OCR is treated as an override that takes priority when
-            // it's actively working; the telemetry-based end-of-lap delta is the baseline that's
-            // always there (no calibration, no OCR fragility) and is what's used whenever OCR is
-            // disabled, not yet calibrated, or its most recent read failed. The two are never
-            // blended/averaged — that would produce a value that means neither "this instant" nor
-            // "at the last lap line," which is worse than picking one clearly-defined source.
-            DeltaToBestSec = _lastScreenDeltaSucceeded ? _lastScreenDeltaSec : _endOfLapDeltaToBestSec,
+            // Real (if coarse) delta-to-best: updates once per completed lap (see ParseLapData),
+            // held constant until the next lap completes. Null until a valid best lap this session
+            // exists. The screen-OCR fallback that previously overrode this with a finer-grained
+            // signal has been removed.
+            DeltaToBestSec = _endOfLapDeltaToBestSec,
             GapToCarAheadSec = _gapToCarAheadSec,
             PlayerTireCompound = _playerTireCompound,
             CarAheadTireCompound = _carAheadTireCompound,
@@ -630,9 +593,5 @@ public sealed class F125TelemetrySource : ITelemetrySource
         Stop();
         _client?.Dispose();
         _cts?.Dispose();
-        if (_screenDeltaReader is not null)
-        {
-            _screenDeltaReader.DeltaRead -= OnScreenDeltaRead;
-        }
     }
 }
