@@ -35,6 +35,12 @@ public partial class MainWindow : Window
             _speech.SetOutputToDefaultAudioDevice();
             _speech.Volume = 100;
             _speech.Rate = 0;
+
+            // Unconditional startup announcement, bypassing all coaching/debounce logic entirely -
+            // isolates "is the audio pipeline broken" from "is the coaching state logic broken".
+            // If you don't hear this at launch, the problem is System.Speech/Windows audio routing,
+            // not anything in CoachEngine or the debounce logic added afterward.
+            _speech.SpeakAsync("Testing text to speech");
         }
         catch (Exception ex)
         {
