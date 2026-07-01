@@ -1,0 +1,81 @@
+<Window x:Class="OutplayOverlay.CalibrationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Screen Delta OCR Setup"
+        Width="480" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        AllowsTransparency="True"
+        WindowStyle="None"
+        ResizeMode="NoResize">
+
+    <Border Background="#EE101010" BorderBrush="#444" BorderThickness="1" CornerRadius="8" Padding="16">
+        <StackPanel>
+            <Grid Margin="0,0,0,10">
+                <TextBlock Text="Screen Delta OCR Setup" Foreground="White" FontFamily="Consolas"
+                           FontSize="14" FontWeight="Bold"/>
+                <Button Content="x" Width="22" Height="22" HorizontalAlignment="Right"
+                        Background="Transparent" BorderThickness="0" Foreground="Gray"
+                        FontFamily="Consolas" Cursor="Hand" Click="CloseButton_Click"/>
+            </Grid>
+
+            <TextBlock Foreground="#CCCCCC" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10">
+                This reads F1 25's on-screen delta HUD via a screen region you define below. Requires:
+            </TextBlock>
+            <TextBlock Foreground="#CCCCCC" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Margin="8,-8,0,2">
+                • F1 25 running in Borderless/Windowed mode (same limitation as this overlay itself)
+            </TextBlock>
+            <TextBlock Foreground="#CCCCCC" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Margin="8,0,0,10">
+                • the delta-to-best HUD element enabled in your in-game HUD settings
+            </TextBlock>
+
+            <TextBlock Text="Region (screen pixels):" Foreground="White" FontFamily="Consolas" FontSize="11" Margin="0,0,0,6"/>
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Margin="0,0,8,6">
+                    <TextBlock Text="X" Foreground="Gray" FontFamily="Consolas" FontSize="11" Width="60" VerticalAlignment="Center"/>
+                    <TextBox x:Name="XBox" Width="80" FontFamily="Consolas" FontSize="11" Padding="3"/>
+                </StackPanel>
+                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Y" Foreground="Gray" FontFamily="Consolas" FontSize="11" Width="60" VerticalAlignment="Center"/>
+                    <TextBox x:Name="YBox" Width="80" FontFamily="Consolas" FontSize="11" Padding="3"/>
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Margin="0,0,8,0">
+                    <TextBlock Text="Width" Foreground="Gray" FontFamily="Consolas" FontSize="11" Width="60" VerticalAlignment="Center"/>
+                    <TextBox x:Name="WidthBox" Width="80" FontFamily="Consolas" FontSize="11" Padding="3"/>
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                    <TextBlock Text="Height" Foreground="Gray" FontFamily="Consolas" FontSize="11" Width="60" VerticalAlignment="Center"/>
+                    <TextBox x:Name="HeightBox" Width="80" FontFamily="Consolas" FontSize="11" Padding="3"/>
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Foreground="Gray" FontFamily="Consolas" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,10">
+                Tip: pause the game, take a screenshot, and use an image viewer's pixel coords to find the box around the delta readout.
+            </TextBlock>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <Button x:Name="TestRegionButton" Content="Test Region" FontFamily="Consolas" FontSize="11"
+                        Padding="8,4" Click="TestRegionButton_Click"/>
+            </StackPanel>
+            <TextBlock x:Name="TestResultText" Text="Last test: --" Foreground="Gray" FontFamily="Consolas"
+                       FontSize="10" TextWrapping="Wrap" Margin="0,2,0,14"/>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CancelButton" Content="Cancel" FontFamily="Consolas" FontSize="11"
+                        Padding="10,4" Margin="0,0,8,0" Click="CancelButton_Click"/>
+                <Button x:Name="SaveButton" Content="Save Region" FontFamily="Consolas" FontSize="11"
+                        Padding="10,4" Click="SaveButton_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

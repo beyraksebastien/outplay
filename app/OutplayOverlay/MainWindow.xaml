@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Outplay Overlay"
-        Width="260" Height="220"
+        Width="260" Height="300"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -14,7 +14,40 @@
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
 
     <Border Background="#CC101010" CornerRadius="8" Padding="12">
-        <StackPanel>
+        <Grid>
+            <StackPanel>
+            <!-- Coaching block: shown before the "COACH: --" fallback until the first
+                 CoachingSignal arrives, then swaps to the live state/delta/gap/tires rows. -->
+            <TextBlock x:Name="CoachNoSignalText" Text="COACH: --" Foreground="Gray"
+                       FontFamily="Consolas" FontSize="12" Margin="0,0,0,8"/>
+
+            <StackPanel x:Name="CoachPanel" Visibility="Collapsed" Margin="0,0,0,8">
+                <TextBlock x:Name="CoachStateText" Text="STEADY" Foreground="White"
+                           FontFamily="Consolas" FontSize="28" FontWeight="Bold"/>
+
+                <Grid Margin="0,2,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                        <TextBlock Text="Δ best: " Foreground="Gray" FontFamily="Consolas" FontSize="11"/>
+                        <TextBlock x:Name="CoachDeltaText" Text="--" Foreground="Gray" FontFamily="Consolas" FontSize="11"/>
+                        <TextBlock x:Name="CoachOcrTagText" Text="" Foreground="Gray" FontFamily="Consolas"
+                                   FontSize="10" Margin="4,0,0,0" Visibility="Collapsed"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <TextBlock Text="gap ahead: " Foreground="Gray" FontFamily="Consolas" FontSize="11"/>
+                        <TextBlock x:Name="CoachGapText" Text="--" Foreground="White" FontFamily="Consolas" FontSize="11"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock x:Name="CoachTiresText" Text="YOU -- · AHEAD --" Foreground="Gray"
+                           FontFamily="Consolas" FontSize="10" Margin="0,2,0,0"/>
+            </StackPanel>
+
+            <Border BorderBrush="#333" BorderThickness="0,0,0,1" Margin="0,0,0,8"/>
+
             <TextBlock x:Name="StatusText" Text="Waiting for sim..." Foreground="Orange"
                        FontFamily="Consolas" FontSize="12" Margin="0,0,0,8"/>
 
@@ -49,6 +82,30 @@
                 <TextBlock Grid.Column="0" Text="GEAR" Foreground="Gray" FontFamily="Consolas" FontSize="10"/>
                 <TextBlock x:Name="GearText" Grid.Column="1" Text="-" Foreground="White" FontFamily="Consolas" FontSize="14" HorizontalAlignment="Right"/>
             </Grid>
-        </StackPanel>
+            </StackPanel>
+
+            <!-- Settings gear: opens the OCR-fallback flyout. Kept out of the flow of the main
+                 coaching/telemetry StackPanel so it just sits in the corner of the panel. -->
+            <ToggleButton x:Name="GearButton" Content="⚙" HorizontalAlignment="Right" VerticalAlignment="Top"
+                          Width="20" Height="20" Padding="0" FontSize="13"
+                          Background="Transparent" BorderThickness="0" Foreground="Gray"
+                          Cursor="Hand" Click="GearButton_Click"/>
+
+            <Popup x:Name="GearPopup" PlacementTarget="{Binding ElementName=GearButton}" Placement="Bottom"
+                   StaysOpen="False" AllowsTransparency="True" Closed="GearPopup_Closed">
+                <Border Background="#F0101010" BorderBrush="#444" BorderThickness="1" CornerRadius="6" Padding="10" Width="220">
+                    <StackPanel>
+                        <TextBlock Text="OCR Delta Fallback" Foreground="White" FontFamily="Consolas"
+                                   FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
+                        <CheckBox x:Name="OcrEnabledCheck" Content="Enabled" Foreground="White" FontFamily="Consolas"
+                                  FontSize="11" Margin="0,0,0,6" Checked="OcrEnabledCheck_Checked" Unchecked="OcrEnabledCheck_Unchecked"/>
+                        <TextBlock x:Name="OcrRegionText" Text="Region: 100,100 160x50" Foreground="Gray"
+                                   FontFamily="Consolas" FontSize="10" Margin="0,0,0,8"/>
+                        <Button x:Name="CalibrateButton" Content="Calibrate..." FontFamily="Consolas" FontSize="11"
+                                Padding="6,3" Click="CalibrateButton_Click"/>
+                    </StackPanel>
+                </Border>
+            </Popup>
+        </Grid>
     </Border>
 </Window>

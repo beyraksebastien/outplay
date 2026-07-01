@@ -23,4 +23,13 @@ public sealed record TelemetrySample
     public float? LapDistancePct { get; init; } // 0..1 around current lap
     public float? CurrentLapTimeSec { get; init; }
     public float? DeltaToBestSec { get; init; }
+
+    // --- Coaching-support fields (opponent/tire context) ---
+    // Populated at the adapter boundary so CoachEngine and scoring logic never need to know
+    // sim-specific quirks. Null means "not available this tick" (session just started, var
+    // not exposed by this sim/car, no car ahead on track, etc.) — consumers must treat these
+    // as optional.
+    public float? GapToCarAheadSec { get; init; }       // both sims, seconds, positive = car ahead is that far ahead
+    public string? PlayerTireCompound { get; init; }    // both sims
+    public string? CarAheadTireCompound { get; init; }  // both sims
 }

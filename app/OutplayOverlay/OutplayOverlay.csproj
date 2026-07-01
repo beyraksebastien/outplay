@@ -14,6 +14,20 @@
   <ItemGroup>
     <!-- Modern actively-maintained iRacing SDK wrapper (shared-memory reader). -->
     <PackageReference Include="IRSDKSharper" Version="1.1.9" />
+    <!-- Windows built-in TTS (SpeechSynthesizer) for spoken coaching callouts. Not included by
+         default in a WPF SDK-style project targeting net8.0-windows. Package name/version
+         unverified — flagged in report. -->
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <!-- GDI-based screen capture (Graphics.CopyFromScreen) for the F1 25 HUD-delta OCR fallback.
+         Not included by default in a WPF SDK-style net8.0-windows project. Package name/version
+         unverified — flagged in report (same established-pattern caveat as IRSDKSharper/System.Speech). -->
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <!-- Open-source Tesseract OCR .NET wrapper, used to read the F1 25 in-game delta-to-best HUD
+         number as a fallback for DeltaToBestSec. Package name/version AND API usage (TesseractEngine,
+         Pix.LoadFromMemory, PageSegMode, EngineMode) are unverified — flagged in report. Requires a
+         "tessdata" folder with eng.traineddata copied to the output directory; not wired up here
+         since MSBuild content-copy config depends on how this project's build/publish is set up. -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
   </ItemGroup>
 
 </Project>
