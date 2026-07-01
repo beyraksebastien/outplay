@@ -16,7 +16,7 @@
     <Border Background="#CC101010" CornerRadius="8" Padding="12">
         <Grid>
             <StackPanel>
-            <!-- Coaching block: shown before the "COACH: --" fallback until the first
+            <!-- Coaching block: shown before the "COACH: (none)" fallback until the first
                  CoachingSignal arrives, then swaps to the live state/delta/gap/tires rows. -->
             <TextBlock x:Name="CoachNoSignalText" Text="COACH: --" Foreground="Gray"
                        FontFamily="Consolas" FontSize="12" Margin="0,0,0,8"/>
