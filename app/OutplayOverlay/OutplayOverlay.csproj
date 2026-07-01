@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>OutplayOverlay</AssemblyName>
+    <ApplicationIcon />
+    <Platforms>x64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Modern actively-maintained iRacing SDK wrapper (shared-memory reader). -->
+    <PackageReference Include="IRSDKSharper" Version="1.6.0" />
+  </ItemGroup>
+
+</Project>
