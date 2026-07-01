@@ -3,6 +3,9 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
 using OutplayOverlay.Telemetry;
+// Disambiguates against System.Drawing.Brushes, implicitly in scope project-wide now that
+// UseWindowsForms=true is set alongside UseWPF=true.
+using Brushes = System.Windows.Media.Brushes;
 
 namespace OutplayOverlay;
 

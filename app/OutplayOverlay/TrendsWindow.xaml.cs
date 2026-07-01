@@ -2,6 +2,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using OutplayOverlay.Telemetry;
+// Disambiguates against System.Drawing.Color and System.Windows.Forms.HorizontalAlignment,
+// both implicitly in scope project-wide now that UseWindowsForms=true is set alongside UseWPF=true.
+using Color = System.Windows.Media.Color;
+using HorizontalAlignment = System.Windows.HorizontalAlignment;
 
 namespace OutplayOverlay;
 

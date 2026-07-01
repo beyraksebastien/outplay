@@ -3,6 +3,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using OutplayOverlay.Telemetry;
+// Disambiguates against System.Drawing.Color/Brush/Brushes and System.Windows.Forms.Orientation,
+// all implicitly in scope project-wide now that UseWindowsForms=true is set alongside UseWPF=true.
+using Color = System.Windows.Media.Color;
+using Brush = System.Windows.Media.Brush;
+using Brushes = System.Windows.Media.Brushes;
+using Orientation = System.Windows.Controls.Orientation;
 
 namespace OutplayOverlay;
 
