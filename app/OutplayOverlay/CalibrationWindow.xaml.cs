@@ -22,6 +22,17 @@ public partial class CalibrationWindow : Window
     private bool _testInProgress;
     private DispatcherTimer? _testTimeoutTimer;
 
+    // Auto-detect and Test Region both mutate/observe reader state (region, enabled) transiently,
+    // so only one may run at a time - both buttons disable while EITHER is in-flight.
+    private bool _autoDetectInProgress;
+
+    private void UpdateButtonsEnabled()
+    {
+        var enabled = !_testInProgress && !_autoDetectInProgress;
+        TestRegionButton.IsEnabled = enabled;
+        AutoDetectButton.IsEnabled = enabled;
+    }
+
     public CalibrationWindow(ScreenDeltaReader reader)
     {
         InitializeComponent();
@@ -49,7 +60,7 @@ public partial class CalibrationWindow : Window
 
     private void TestRegionButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_testInProgress) return;
+        if (_testInProgress || _autoDetectInProgress) return;
 
         if (!TryReadRegionFromBoxes(out var region))
         {
@@ -69,7 +80,7 @@ public partial class CalibrationWindow : Window
         if (!wasEnabled) _reader.Enable();
 
         _testInProgress = true;
-        TestRegionButton.IsEnabled = false;
+        UpdateButtonsEnabled();
         TestResultText.Text = "Last test: reading...";
         TestResultText.Foreground = Brushes.Gray;
 
@@ -107,7 +118,7 @@ public partial class CalibrationWindow : Window
 
             if (!restoreEnabled) _reader.Disable();
 
-            TestRegionButton.IsEnabled = true;
+            UpdateButtonsEnabled();
 
             if (reading is null)
             {
@@ -129,6 +140,52 @@ public partial class CalibrationWindow : Window
                 TestResultText.Text = $"Last test: garbled — raw: \"{reading.RawText}\"";
                 TestResultText.Foreground = Brushes.OrangeRed;
             }
+        }
+    }
+
+    private async void AutoDetectButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_testInProgress || _autoDetectInProgress) return;
+
+        _autoDetectInProgress = true;
+        UpdateButtonsEnabled();
+        TestResultText.Text = "Scanning screen for delta HUD... (~1-3s)";
+        TestResultText.Foreground = Brushes.Gray;
+
+        try
+        {
+            var result = await _reader.AutoDetectRegionAsync();
+
+            if (result.Success && result.DetectedRegion is { } detected)
+            {
+                XBox.Text = detected.X.ToString(CultureInfo.InvariantCulture);
+                YBox.Text = detected.Y.ToString(CultureInfo.InvariantCulture);
+                WidthBox.Text = detected.Width.ToString(CultureInfo.InvariantCulture);
+                HeightBox.Text = detected.Height.ToString(CultureInfo.InvariantCulture);
+
+                TestResultText.Text = $"Auto-detect found: X={detected.X} Y={detected.Y} Width={detected.Width} " +
+                                       $"Height={detected.Height} — Sample read: \"{result.SampleReading}\" — " +
+                                       $"Scanned {result.CandidatesScanned} regions";
+                TestResultText.Foreground = Brushes.LimeGreen;
+            }
+            else
+            {
+                TestResultText.Text = $"Auto-detect: scanned {result.CandidatesScanned} regions, no match found - " +
+                                       "try manual calibration, or make sure F1 25's delta HUD element is enabled " +
+                                       "and visible on screen.";
+                TestResultText.Foreground = Brushes.Gray;
+            }
+        }
+        catch (Exception ex)
+        {
+            TestResultText.Text = "Auto-detect: an error occurred while scanning - try manual calibration.";
+            TestResultText.Foreground = Brushes.OrangeRed;
+            System.Diagnostics.Debug.WriteLine($"[Calibration] AutoDetectRegionAsync failed: {ex}");
+        }
+        finally
+        {
+            _autoDetectInProgress = false;
+            UpdateButtonsEnabled();
         }
     }
 

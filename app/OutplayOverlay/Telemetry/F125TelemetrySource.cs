@@ -49,6 +49,15 @@ public sealed class F125TelemetrySource : ITelemetrySource
     // compared to e.g. Session History below.
     private const byte SessionPacketId = 1;
 
+    // --- Session packet (id 1) marshal zones (FEATURE 2, track flag) ---
+    // UNVERIFIED, HIGH RISK: struct layout transcribed from the public F1 24 UDP telemetry spec,
+    // for the fields BETWEEN trackLength and m_marshalZones — this is a much deeper/riskier
+    // offset chain than the trackLength read above (12 single/double-byte fields precede the
+    // array here, vs. 4 before trackLength), so a single wrong field size anywhere in that chain
+    // silently misreads every zone. See ParseSession for the full field list read in order.
+    private const int MarshalZoneSize = 5; // float m_zoneStart (4 bytes) + sbyte m_zoneFlag (1 byte)
+    private const int MaxMarshalZones = 21; // fixed array size per the F1 24/25 spec
+
     // --- Session History packet (id 11) ---
     // UNVERIFIED, HIGH RISK: struct layout transcribed from the public F1 24 UDP telemetry spec
     // (F1 25 not independently confirmed). Per the spec:
@@ -99,6 +108,9 @@ public sealed class F125TelemetrySource : ITelemetrySource
     private uint? _lastSeenLastLapTimeMs;      // most recent Lap Data "lastLapTimeInMS" value seen (used to detect a new completed lap)
     private float? _endOfLapDeltaToBestSec;    // held constant between lap completions; see design note
     private float? _lapDistancePctF1;          // derived from lapDistance / trackLength, F1 25 only
+
+    // --- Track flag (FEATURE 2), from PacketSessionData (id 1) marshal zones — see ParseSession. ---
+    private TrackFlag? _trackFlagF1;
 
     public event Action<TelemetrySample>? SampleReceived;
     public event Action<bool>? ConnectionChanged;
@@ -238,10 +250,104 @@ public sealed class F125TelemetrySource : ITelemetrySource
         reader.ReadSByte(); // airTemperature
         reader.ReadByte();  // totalLaps
         var trackLength = reader.ReadUInt16(); // metres
-        // Remaining Session fields not needed for this task — stop reading.
 
         _trackLengthM = trackLength > 0 ? trackLength : null;
+
+        // FEATURE 2 — continue reading past trackLength to reach m_marshalZones. Per the F1 24/25
+        // spec (UNVERIFIED, see MarshalZoneSize/MaxMarshalZones comment above), the fields between
+        // trackLength and the marshal zone array are, in order:
+        //   int8 trackId, uint8 formula, uint16 sessionTimeLeft, uint16 sessionDuration,
+        //   uint8 pitSpeedLimit, uint8 gamePaused, uint8 isSpectating, uint8 spectatorCarIndex,
+        //   uint8 sliProNativeSupport, uint8 numMarshalZones,
+        //   MarshalZone marshalZones[21] (float m_zoneStart, sbyte m_zoneFlag).
+        // 12 bytes of fixed fields between trackLength and numMarshalZones's own byte (trackId 1 +
+        // formula 1 + sessionTimeLeft 2 + sessionDuration 2 + pitSpeedLimit 1 + gamePaused 1 +
+        // isSpectating 1 + spectatorCarIndex 1 + sliProNativeSupport 1 = 11, then numMarshalZones
+        // itself is the 12th byte read below).
+        var marshalZonesHeaderOffset = offset + 6; // right after trackLength
+        if (buffer.Length < marshalZonesHeaderOffset + 12)
+        {
+            _trackFlagF1 = null; // not enough bytes to safely reach numMarshalZones — leave unknown
+            return;
+        }
+
+        ms.Position = marshalZonesHeaderOffset;
+        reader.ReadSByte();  // trackId
+        reader.ReadByte();   // formula
+        reader.ReadUInt16(); // sessionTimeLeft
+        reader.ReadUInt16(); // sessionDuration
+        reader.ReadByte();   // pitSpeedLimit
+        reader.ReadByte();   // gamePaused
+        reader.ReadByte();   // isSpectating
+        reader.ReadByte();   // spectatorCarIndex
+        reader.ReadByte();   // sliProNativeSupport
+        var numMarshalZones = reader.ReadByte();
+
+        if (numMarshalZones > MaxMarshalZones)
+        {
+            // Out-of-range value strongly suggests a mis-parsed offset above — bail rather than
+            // read garbage as if it were zone flags.
+            _trackFlagF1 = null;
+            return;
+        }
+
+        var marshalZonesArrayStart = marshalZonesHeaderOffset + 12;
+        if (buffer.Length < marshalZonesArrayStart + numMarshalZones * MarshalZoneSize)
+        {
+            _trackFlagF1 = null;
+            return;
+        }
+
+        // FEATURE 2 DESIGN NOTE (v1 simplification, documented tradeoff): F1 25 reports flag state
+        // per marshal zone (a segment of track), not one global flag. Correlating the player's
+        // current LapDistancePct to "which zone am I in right now" would need the zones sorted by
+        // m_zoneStart and the player's position tested against zone boundaries — doable, but adds
+        // another layer of unverified assumptions (zone ordering, exact meaning of m_zoneStart as
+        // a fraction of lap vs. track, whether zones wrap across the start/finish line) on top of
+        // the already-shaky struct-offset chain above. V1 instead reports the MOST SEVERE flag
+        // present across ANY zone — a "track-wide" signal, not "the zone you're currently in".
+        // This means a yellow flag on the opposite side of the track will be announced even if
+        // your local zone is green, which is a real limitation but a safe-by-default one (drivers
+        // are told "caution somewhere on track", never told "all clear" while a zone elsewhere is
+        // yellow) and is a reasonable v1 scope call rather than silently guessing at zone geometry.
+        ms.Position = marshalZonesArrayStart;
+        var mostSevere = TrackFlag.Unknown;
+        var foundAny = false;
+        for (var i = 0; i < numMarshalZones; i++)
+        {
+            reader.ReadSingle();     // m_zoneStart — unused in this v1 track-wide simplification
+            var zoneFlag = reader.ReadSByte(); // -1 invalid/unknown, 0 none, 1 green, 2 blue, 3 yellow, 4 red
+
+            var mapped = zoneFlag switch
+            {
+                4 => TrackFlag.Red,
+                3 => TrackFlag.Yellow,
+                1 => TrackFlag.Green,
+                // 2 (blue) is a "car being lapped" warning to an individual driver, not a track
+                // condition flag, and 0/-1 mean no flag/unknown for this zone — none of these
+                // should override a more severe flag already found in an earlier zone.
+                _ => (TrackFlag?)null,
+            };
+
+            if (mapped is not TrackFlag flag) continue;
+            foundAny = true;
+            if (Severity(flag) > Severity(mostSevere)) mostSevere = flag;
+        }
+
+        _trackFlagF1 = foundAny ? mostSevere : null;
     }
+
+    /// <summary>Severity ranking used only to pick the worst flag across marshal zones in
+    /// ParseSession — Red > Yellow > Green (F1 25's zoneFlag codes don't distinguish
+    /// caution/white/chequered the way iRacing's SessionFlags bitfield does, so this is a smaller
+    /// scale than IRacingTelemetrySource's priority order).</summary>
+    private static int Severity(TrackFlag flag) => flag switch
+    {
+        TrackFlag.Red => 3,
+        TrackFlag.Yellow => 2,
+        TrackFlag.Green => 1,
+        _ => 0,
+    };
 
     /// <summary>
     /// PacketSessionHistoryData (id 11). See the field-layout comment on
@@ -340,6 +446,7 @@ public sealed class F125TelemetrySource : ITelemetrySource
             GapToCarAheadSec = _gapToCarAheadSec,
             PlayerTireCompound = _playerTireCompound,
             CarAheadTireCompound = _carAheadTireCompound,
+            TrackFlag = _trackFlagF1,
         };
 
         SampleReceived?.Invoke(sample);

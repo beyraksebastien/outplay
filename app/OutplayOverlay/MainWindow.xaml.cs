@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private readonly CoachEngine _coach;
     private readonly SessionLogger _sessionLogger;
     private readonly CornerIntelligenceEngine _cornerIntel;
+    private readonly FlagWatcher _flagWatcher;
     private readonly SpeechSynthesizer _speech = new();
     private string? _activeSim;
     private PushHoldState? _lastSpokenState;
@@ -21,6 +22,14 @@ public partial class MainWindow : Window
     private DateTime _lastSpeechUtc = DateTime.MinValue;
     private static readonly TimeSpan SpokenStateDebounce = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan MinTimeBetweenSpeech = TimeSpan.FromSeconds(2);
+
+    // Flag announcements use a wholly separate, much shorter debounce budget from coaching-state
+    // voice above (SpokenStateDebounce/MinTimeBetweenSpeech/_lastSpeechUtc are NOT touched by this
+    // path and vice versa) - flags are rare, safety-relevant transitions that FlagWatcher already
+    // only fires on genuine change, so all that's needed here is a floor against back-to-back
+    // announcements, not a hold-then-speak debounce window like the noisy per-tick coaching signal.
+    private DateTime _lastFlagSpeechUtc = DateTime.MinValue;
+    private static readonly TimeSpan MinTimeBetweenFlagSpeech = TimeSpan.FromSeconds(1);
     private ScreenDeltaReading? _lastScreenDeltaReading;
     private SessionSummary? _latestSummary;
     private SessionCornerReport? _latestCornerReport;
@@ -36,7 +45,32 @@ public partial class MainWindow : Window
             // caught exception (logged below) instead of silent nothing.
             _speech.SetOutputToDefaultAudioDevice();
             _speech.Volume = 100;
-            _speech.Rate = 0;
+
+            // Windows ships several legacy SAPI5 voices ("Microsoft David/Zira Desktop") that read
+            // flat and monotone by default, plus - on most Windows 10/11 installs - a set of newer,
+            // more natural-sounding "OneCore" voices (e.g. "Microsoft Zira" without "Desktop" in the
+            // name, or region-specific ones like "Microsoft Hazel"/"Microsoft Mark"). Prefer any
+            // installed voice whose name does NOT contain "Desktop", since in practice those are the
+            // older/flatter engine; fall back to whatever's installed if every voice is a Desktop one
+            // (still works, just not the nicest option available). This is a heuristic based on
+            // common Windows voice-pack naming, not a guaranteed distinction - unverified against
+            // every possible Windows install/voice-pack configuration.
+            var voices = _speech.GetInstalledVoices()
+                .Where(v => v.Enabled)
+                .Select(v => v.VoiceInfo)
+                .ToList();
+            var preferred = voices.FirstOrDefault(v => !v.Name.Contains("Desktop", StringComparison.OrdinalIgnoreCase))
+                             ?? voices.FirstOrDefault();
+            if (preferred is not null)
+            {
+                _speech.SelectVoice(preferred.Name);
+                System.Diagnostics.Debug.WriteLine($"[Speech] Using voice: {preferred.Name}");
+            }
+
+            // A touch slower than the default reads calmer/less clipped for short phrases like
+            // "Push" or "Backing off" - full-speed SAPI voices can sound rushed/robotic on very
+            // short utterances specifically (long sentences don't have this problem as much).
+            _speech.Rate = -1;
 
             // Unconditional startup announcement, bypassing all coaching/debounce logic entirely -
             // isolates "is the audio pipeline broken" from "is the coaching state logic broken".
@@ -61,6 +95,9 @@ public partial class MainWindow : Window
 
         _cornerIntel = new CornerIntelligenceEngine(_hub);
 
+        _flagWatcher = new FlagWatcher(_hub);
+        _flagWatcher.FlagChanged += OnFlagChanged;
+
         _hub.StartAll();
 
         Closed += (_, _) =>
@@ -68,6 +105,7 @@ public partial class MainWindow : Window
             _coach.Dispose();
             _sessionLogger.Dispose();
             _cornerIntel.Dispose();
+            _flagWatcher.Dispose();
             _hub.Dispose();
             _speech.Dispose();
         };
@@ -228,20 +266,25 @@ public partial class MainWindow : Window
             {
                 _lastSpokenState = signal.State;
                 _lastSpeechUtc = now;
-                var phrase = signal.State switch
+                // Slight prosody variation per state via SSML - a flat, identically-toned "Push"
+                // and "Backing off" both read as robotic; a small pitch/rate lift on the urgent
+                // ones gives them a bit of character without needing a different TTS engine.
+                var (phrase, rate, pitch) = signal.State switch
                 {
-                    PushHoldState.Push => "Push",
-                    PushHoldState.BackingOff => "Backing off",
-                    _ => "Steady",
+                    PushHoldState.Push => ("Push", "+15%", "+5%"),
+                    PushHoldState.BackingOff => ("Backing off", "-5%", "-5%"),
+                    _ => ("Steady", "+0%", "+0%"),
                 };
                 try
                 {
                     _speech.SpeakAsyncCancelAll();
-                    _speech.SpeakAsync(phrase);
+                    var ssml = $"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\">" +
+                               $"<prosody rate=\"{rate}\" pitch=\"{pitch}\">{phrase}</prosody></speak>";
+                    _speech.SpeakSsmlAsync(ssml);
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[Speech] SpeakAsync('{phrase}') failed: {ex}");
+                    System.Diagnostics.Debug.WriteLine($"[Speech] SpeakSsmlAsync('{phrase}') failed: {ex}");
                 }
             }
         });
@@ -252,6 +295,49 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             _lastScreenDeltaReading = reading;
+        });
+    }
+
+    private void OnFlagChanged(TrackFlagChanged change)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            // Unknown means "no useful signal" (see FlagWatcher/TrackFlag remarks), not a
+            // real transition worth announcing - skip silently.
+            if (change.Flag == TrackFlag.Unknown) return;
+
+            var now = DateTime.UtcNow;
+            if (now - _lastFlagSpeechUtc < MinTimeBetweenFlagSpeech) return;
+
+            _lastFlagSpeechUtc = now;
+
+            var (phrase, rate, pitch) = change.Flag switch
+            {
+                TrackFlag.Green => ("Green flag", "+0%", "+0%"),
+                TrackFlag.White => ("White flag", "+10%", "+0%"),
+                TrackFlag.Yellow => ("Yellow flag", "+10%", "+3%"),
+                TrackFlag.Caution => ("Caution", "+10%", "+3%"),
+                TrackFlag.Red => ("Red flag", "+15%", "+8%"),
+                TrackFlag.Checkered => ("Checkered flag", "+0%", "+0%"),
+                _ => (null, "+0%", "+0%"),
+            };
+            if (phrase is null) return;
+
+            try
+            {
+                // Flags are rarer and more safety-relevant than the continuous coaching-state
+                // callouts, so a flag announcement interrupts/cancels any in-progress coaching
+                // speech (never the reverse) - same SpeakAsyncCancelAll() call site pattern the
+                // coaching-voice code already uses, just triggered from this independent path too.
+                _speech.SpeakAsyncCancelAll();
+                var ssml = $"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"en-US\">" +
+                           $"<prosody rate=\"{rate}\" pitch=\"{pitch}\">{phrase}</prosody></speak>";
+                _speech.SpeakSsmlAsync(ssml);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Speech] Flag SpeakSsmlAsync('{phrase}') failed: {ex}");
+            }
         });
     }
 

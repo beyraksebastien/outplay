@@ -65,7 +65,9 @@
 
             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                 <Button x:Name="TestRegionButton" Content="Test Region" FontFamily="Consolas" FontSize="11"
-                        Padding="8,4" Click="TestRegionButton_Click"/>
+                        Padding="8,4" Margin="0,0,8,0" Click="TestRegionButton_Click"/>
+                <Button x:Name="AutoDetectButton" Content="Auto-Detect Region" FontFamily="Consolas" FontSize="11"
+                        Padding="8,4" Click="AutoDetectButton_Click"/>
             </StackPanel>
             <TextBlock x:Name="TestResultText" Text="Last test: --" Foreground="Gray" FontFamily="Consolas"
                        FontSize="10" TextWrapping="Wrap" Margin="0,2,0,14"/>

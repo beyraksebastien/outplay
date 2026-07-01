@@ -32,4 +32,11 @@ public sealed record TelemetrySample
     public float? GapToCarAheadSec { get; init; }       // both sims, seconds, positive = car ahead is that far ahead
     public string? PlayerTireCompound { get; init; }    // both sims
     public string? CarAheadTireCompound { get; init; }  // both sims
+
+    /// <summary>Current track flag state, derived at the adapter boundary from each sim's
+    /// sim-specific representation (iRacing's SessionFlags bitfield; F1 25's per-marshal-zone
+    /// m_zoneFlag array) — see FlagWatcher.cs for the TrackFlag enum and IRacingTelemetrySource /
+    /// F125TelemetrySource for the derivation. Null means "not available this tick" (e.g. no
+    /// Session packet received yet for F1 25), not "green" — consumers must not assume a default.</summary>
+    public TrackFlag? TrackFlag { get; init; }
 }

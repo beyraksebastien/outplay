@@ -73,6 +73,7 @@ public sealed class IRacingTelemetrySource : ITelemetrySource
                 GapToCarAheadSec = TryComputeGapToCarAhead(_sdk),
                 PlayerTireCompound = TryGetPlayerTireCompound(_sdk),
                 CarAheadTireCompound = TryGetCarAheadTireCompound(_sdk),
+                TrackFlag = TryGetTrackFlag(_sdk),
             };
 
             SampleReceived?.Invoke(sample);
@@ -138,6 +139,53 @@ public sealed class IRacingTelemetrySource : ITelemetrySource
             // confirm against live telemetry (should be a small positive number, growing as
             // you fall behind).
             return myEstTime - aheadEstTime;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // --- Track flag (FEATURE 2) ---
+    // UNVERIFIED, HIGH RISK: bit values transcribed from the public irsdk C header
+    // (irsdk_Flags enum), NOT independently confirmed against IRSDKSharper 1.1.9's actual runtime
+    // values or a live iRacing session — same caution level as every other iRacing variable-name
+    // guess in this file. If GetInt("SessionFlags") throws (wrong variable name) this falls back
+    // to null via the try/catch below, same as the other Try* helpers.
+    private const int FlagGreen = 0x00000004;
+    private const int FlagYellow = 0x00000008;
+    private const int FlagYellowWaving = 0x00000100;
+    private const int FlagCaution = 0x00004000;
+    private const int FlagCautionWaving = 0x00008000;
+    private const int FlagRed = 0x00000010;
+    private const int FlagChequered = 0x00000001;
+    private const int FlagWhite = 0x00000002;
+
+    /// <summary>
+    /// SessionFlags is a bitfield — multiple bits can be set at once (e.g. yellow + yellowWaving
+    /// together during a caution period). Priority order below picks the single most "urgent" one
+    /// to surface for an announcement, most urgent first:
+    ///   Red (full-course stop, highest urgency) > Caution/CautionWaving (slow down, hold
+    ///   position) > Yellow/YellowWaving (local caution) > White (final lap / slow vehicle
+    ///   warning) > Chequered (session ending — informational, no immediate driving hazard) >
+    ///   Green (all-clear / racing resumed).
+    /// This ordering is a judgment call (documented per the task brief), not verified against any
+    /// iRacing UX convention — flagged as a risk to revisit once tested against a live session
+    /// with a real caution period.
+    /// </summary>
+    private static TrackFlag? TryGetTrackFlag(IRacingSdk sdk)
+    {
+        try
+        {
+            var bits = sdk.Data.GetInt("SessionFlags");
+
+            if ((bits & FlagRed) != 0) return TrackFlag.Red;
+            if ((bits & (FlagCaution | FlagCautionWaving)) != 0) return TrackFlag.Caution;
+            if ((bits & (FlagYellow | FlagYellowWaving)) != 0) return TrackFlag.Yellow;
+            if ((bits & FlagWhite) != 0) return TrackFlag.White;
+            if ((bits & FlagChequered) != 0) return TrackFlag.Checkered;
+            if ((bits & FlagGreen) != 0) return TrackFlag.Green;
+            return TrackFlag.Unknown;
         }
         catch
         {

@@ -4,6 +4,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Needed for System.Windows.Forms.Screen (primary-monitor bounds), used by
+         ScreenDeltaReader.AutoDetectRegionAsync's candidate-grid scan. WPF projects don't pull in
+         WinForms by default even though System.Drawing.Common is already referenced below. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>OutplayOverlay</AssemblyName>
