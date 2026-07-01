@@ -1,11 +1,9 @@
-using irsdkSharper;
+using IRSDKSharper;
 
 namespace OutplayOverlay.Telemetry;
 
 /// <summary>
-/// Reads iRacing telemetry via shared memory using IRSDKSharper.
-/// NOTE: verify exact member names (GetFloat/GetFloatArray) against the installed
-/// IRSDKSharper version's API before first build — wrapper APIs shift between releases.
+/// Reads iRacing telemetry via shared memory using IRSDKSharper (github.com/mherbold/IRSDKSharper).
 /// </summary>
 public sealed class IRacingTelemetrySource : ITelemetrySource
 {
