@@ -15,6 +15,11 @@ public partial class MainWindow : Window
     private readonly SpeechSynthesizer _speech = new();
     private string? _activeSim;
     private PushHoldState? _lastSpokenState;
+    private PushHoldState? _pendingSpokenState;
+    private DateTime _pendingSpokenStateSinceUtc;
+    private DateTime _lastSpeechUtc = DateTime.MinValue;
+    private static readonly TimeSpan SpokenStateDebounce = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan MinTimeBetweenSpeech = TimeSpan.FromSeconds(2);
     private ScreenDeltaReading? _lastScreenDeltaReading;
     private SessionSummary? _latestSummary;
 
@@ -191,11 +196,27 @@ public partial class MainWindow : Window
                 CoachTiresText.Text = $"YOU {you}   ·   AHEAD {ahead}";
             }
 
-            // Voice callout only on PushHoldState transition, not every tick (CoachEngine fires
-            // per telemetry sample, i.e. up to ~60Hz).
-            if (_lastSpokenState != signal.State)
+            // Voice callout only on a PushHoldState transition that HOLDS for a debounce window,
+            // not every tick (CoachEngine fires per telemetry sample, i.e. up to ~60Hz). Without
+            // this, a delta hovering right at CoachEngine's push/hold deadband can flip state
+            // every single tick, spamming SpeakAsyncCancelAll()+SpeakAsync() fast enough to wedge
+            // the underlying SAPI engine into a broken state (observed: voice works once, then
+            // never again). A minimum time-between-speech floor is a second, independent guard
+            // against the same failure mode even if the debounce window itself is too short for
+            // some noisy signal.
+            var now = DateTime.UtcNow;
+
+            if (signal.State != _pendingSpokenState)
+            {
+                _pendingSpokenState = signal.State;
+                _pendingSpokenStateSinceUtc = now;
+            }
+            else if (signal.State != _lastSpokenState
+                     && now - _pendingSpokenStateSinceUtc >= SpokenStateDebounce
+                     && now - _lastSpeechUtc >= MinTimeBetweenSpeech)
             {
                 _lastSpokenState = signal.State;
+                _lastSpeechUtc = now;
                 var phrase = signal.State switch
                 {
                     PushHoldState.Push => "Push",
