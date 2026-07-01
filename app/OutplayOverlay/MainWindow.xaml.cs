@@ -22,6 +22,20 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        try
+        {
+            // Explicit, even though System.Speech is documented to default here - being explicit
+            // avoids depending on that default and makes an audio-routing failure show up as a
+            // caught exception (logged below) instead of silent nothing.
+            _speech.SetOutputToDefaultAudioDevice();
+            _speech.Volume = 100;
+            _speech.Rate = 0;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Speech] Failed to initialize audio output: {ex}");
+        }
+
         _hub.SampleReceived += OnSample;
         _hub.SourceConnectionChanged += OnConnectionChanged;
         _hub.ScreenDelta.DeltaRead += OnScreenDeltaRead;
@@ -188,8 +202,15 @@ public partial class MainWindow : Window
                     PushHoldState.BackingOff => "Backing off",
                     _ => "Steady",
                 };
-                _speech.SpeakAsyncCancelAll();
-                _speech.SpeakAsync(phrase);
+                try
+                {
+                    _speech.SpeakAsyncCancelAll();
+                    _speech.SpeakAsync(phrase);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Speech] SpeakAsync('{phrase}') failed: {ex}");
+                }
             }
         });
     }
