@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using IRSDKSharper;
 
 namespace OutplayOverlay.Telemetry;
@@ -9,6 +10,12 @@ public sealed class IRacingTelemetrySource : ITelemetrySource
 {
     private readonly IRacingSdk _sdk = new();
     private bool _connected;
+
+    // --- Track name (session-info YAML), see TryParseTrackNameFromSessionInfo below. ---
+    // Parsed once per session (the YAML's WeekendInfo doesn't change mid-session) and cached
+    // here; every telemetry tick just reads this field, so there is no per-tick YAML parsing
+    // on the hot path.
+    private string? _trackName;
 
     public event Action<TelemetrySample>? SampleReceived;
     public event Action<bool>? ConnectionChanged;
@@ -24,10 +31,73 @@ public sealed class IRacingTelemetrySource : ITelemetrySource
         _sdk.OnDisconnected += () =>
         {
             _connected = false;
+            _trackName = null; // new connection = possibly a new session/track; re-parse next time
             ConnectionChanged?.Invoke(false);
         };
 
+        // UNVERIFIED, MEDIUM RISK: IRSDKSharper 1.1.9 is assumed to expose an "OnSessionInfo"
+        // event fired whenever the session-info YAML block updates (mirrors the raw irsdk C API,
+        // which distinguishes the per-tick telemetry var buffer from the much-less-frequently
+        // updated session-info string). If this event name/signature is wrong, this is almost
+        // certainly a compile error localized to this one line — the fix is changing the event
+        // name to whatever IRSDKSharper actually exposes (e.g. it may instead only be readable by
+        // polling _sdk.Data.SessionInfoUpdateReady from inside OnTelemetryData). Track name is a
+        // "nice to have, not hot-path-critical" field, so if this doesn't compile the safest quick
+        // fix is deleting this subscription and instead attempting the parse from inside
+        // OnTelemetryData, gated by a bool/counter so it only runs until it first succeeds.
+        _sdk.OnSessionInfo += TryParseTrackNameFromSessionInfo;
+
         _sdk.OnTelemetryData += OnTelemetryData;
+    }
+
+    /// <summary>
+    /// Extracts WeekendInfo:TrackDisplayName (falling back to TrackName) from the session-info
+    /// YAML string. UNVERIFIED, MEDIUM-HIGH RISK, several layered assumptions:
+    ///   1. That IRSDKSharper exposes the raw YAML as a string via `_sdk.Data.SessionInfoYaml`
+    ///      (or similarly named property) rather than only a pre-parsed object graph. If the real
+    ///      property name differs, this needs a one-line fix once verified against the installed
+    ///      package version.
+    ///   2. That the YAML actually contains a `WeekendInfo:` section with a `TrackDisplayName:`
+    ///      field, per the publicly documented irsdk session-info schema (this part is
+    ///      well-established across iRacing SDK tooling and is the lowest-risk assumption here).
+    ///   3. Regex-based extraction (rather than a full YAML parser) is used deliberately: we only
+    ///      need one scalar field out of a large YAML document, and pulling in a YAML parsing
+    ///      dependency (or trusting IRSDKSharper's own YAML query API, whose exact method surface
+    ///      is unverified) for a single string is more risk than it's worth for v1. This regex
+    ///      assumes the field appears as `TrackDisplayName:"Some Track Name"` or
+    ///      `TrackDisplayName: Some Track Name` on its own line, which matches every publicly
+    ///      documented irsdk session-info sample seen in the wild, but has not been checked
+    ///      against a live capture from this exact game build.
+    /// Only runs once per connection (guarded by `_trackName is null`) — the session-info YAML is
+    /// static for the life of a session, so there is no need to re-parse on every update.
+    /// </summary>
+    private void TryParseTrackNameFromSessionInfo()
+    {
+        if (_trackName is not null) return;
+
+        try
+        {
+            var yaml = _sdk.Data.SessionInfoYaml; // ASSUMPTION: property name/shape, see doc comment above
+            if (string.IsNullOrEmpty(yaml)) return;
+
+            var match = Regex.Match(yaml, @"TrackDisplayName:\s*""?([^""\r\n]+)""?");
+            if (!match.Success)
+            {
+                // Fall back to TrackName (shorter/less display-friendly, but more likely present
+                // if TrackDisplayName is ever absent for some car/track combo).
+                match = Regex.Match(yaml, @"TrackName:\s*""?([^""\r\n]+)""?");
+            }
+
+            if (match.Success)
+            {
+                _trackName = match.Groups[1].Value.Trim();
+            }
+        }
+        catch
+        {
+            // Missing/renamed property, malformed YAML, whatever — track name is a nice-to-have,
+            // never let this take down the telemetry connection.
+        }
     }
 
     public void Start() => _sdk.Start();
@@ -74,6 +144,7 @@ public sealed class IRacingTelemetrySource : ITelemetrySource
                 PlayerTireCompound = TryGetPlayerTireCompound(_sdk),
                 CarAheadTireCompound = TryGetCarAheadTireCompound(_sdk),
                 TrackFlag = TryGetTrackFlag(_sdk),
+                TrackName = _trackName,
             };
 
             SampleReceived?.Invoke(sample);

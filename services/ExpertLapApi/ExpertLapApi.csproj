@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Cross-platform on purpose: this runs on a Linux server (Render.com), NOT the Windows
+         desktop app. Do not add net8.0-windows / WPF here — see PART B design note in the repo
+         report for why this is a separate project rather than folded into OutplayOverlay. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Postgres provider for EF Core. Package name/version unverified against NuGet at time of
+         writing (same established-pattern caveat used elsewhere in this repo, e.g.
+         OutplayOverlay.csproj's IRSDKSharper/System.Speech comments) — flagged in report. -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

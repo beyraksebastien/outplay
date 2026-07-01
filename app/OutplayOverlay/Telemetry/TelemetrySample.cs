@@ -20,6 +20,15 @@ public sealed record TelemetrySample
     public float[]? TireTempC { get; init; }  // iRacing only, [FL, FR, RL, RR]
     public float[]? TireWearPct { get; init; } // both sims, [FL, FR, RL, RR]
 
+    /// <summary>Human-readable track name, e.g. "Spa-Francorchamps" (iRacing, from session-info
+    /// YAML's WeekendInfo:TrackDisplayName) or "Silverstone" (F1 25, from PacketSessionData's
+    /// m_trackId mapped through a lookup table). Null until the sim has supplied it this session
+    /// (iRacing: before the first session-info YAML update; F1 25: before the first Session
+    /// packet arrives) — see IRacingTelemetrySource/F125TelemetrySource for extraction and
+    /// SessionLogger for how this reaches the Sessions table. Populated once per session, not
+    /// re-derived per tick (the track doesn't change mid-session).</summary>
+    public string? TrackName { get; init; }
+
     public float? LapDistancePct { get; init; } // 0..1 around current lap
     public float? CurrentLapTimeSec { get; init; }
     public float? DeltaToBestSec { get; init; }

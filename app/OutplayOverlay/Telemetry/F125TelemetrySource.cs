@@ -103,6 +103,9 @@ public sealed class F125TelemetrySource : ITelemetrySource
     // --- Track flag (FEATURE 2), from PacketSessionData (id 1) marshal zones — see ParseSession. ---
     private TrackFlag? _trackFlagF1;
 
+    // --- Track name, from PacketSessionData (id 1) m_trackId — see ParseSession / MapTrackId. ---
+    private string? _trackNameF1;
+
     public event Action<TelemetrySample>? SampleReceived;
     public event Action<bool>? ConnectionChanged;
 
@@ -240,7 +243,8 @@ public sealed class F125TelemetrySource : ITelemetrySource
         }
 
         ms.Position = marshalZonesHeaderOffset;
-        reader.ReadSByte();  // trackId
+        var trackId = reader.ReadSByte(); // m_trackId — see MapTrackId below (FEATURE: track name)
+        _trackNameF1 = MapTrackId(trackId);
         reader.ReadByte();   // formula
         reader.ReadUInt16(); // sessionTimeLeft
         reader.ReadUInt16(); // sessionDuration
@@ -304,6 +308,47 @@ public sealed class F125TelemetrySource : ITelemetrySource
 
         _trackFlagF1 = foundAny ? mostSevere : null;
     }
+
+    /// <summary>
+    /// F1 m_trackId -&gt; display name, per the publicly circulated F1 24 UDP telemetry spec.
+    /// UNVERIFIED, HIGH RISK — flagged explicitly per the task brief: this table has NOT been
+    /// checked against a live F1 25 capture, and EA/Codemasters have reordered/renumbered track
+    /// IDs between game years before (e.g. when new circuits are added mid-list). A wrong mapping
+    /// here silently mislabels the track rather than failing loudly, since any in-range sbyte
+    /// value maps to *some* name. Unknown/negative values (e.g. -1 = no track loaded yet) fall
+    /// through to null rather than a fabricated name.
+    /// </summary>
+    private static string? MapTrackId(sbyte trackId) => trackId switch
+    {
+        0 => "Melbourne",
+        1 => "Paul Ricard",
+        2 => "Shanghai",
+        3 => "Sakhir (Bahrain)",
+        4 => "Catalunya",
+        5 => "Monaco",
+        6 => "Montreal",
+        7 => "Silverstone",
+        9 => "Hockenheim",
+        10 => "Hungaroring",
+        11 => "Spa",
+        12 => "Monza",
+        13 => "Singapore",
+        14 => "Suzuka",
+        15 => "Abu Dhabi",
+        16 => "Texas (COTA)",
+        17 => "Brazil (Interlagos)",
+        18 => "Austria",
+        19 => "Sochi",
+        20 => "Mexico",
+        21 => "Baku",
+        26 => "Zandvoort",
+        27 => "Imola",
+        29 => "Jeddah",
+        30 => "Miami",
+        31 => "Las Vegas",
+        32 => "Losail (Qatar)",
+        _ => null, // unknown/unmapped id (includes -1 "no track loaded yet") — do not guess
+    };
 
     /// <summary>Severity ranking used only to pick the worst flag across marshal zones in
     /// ParseSession — Red > Yellow > Green (F1 25's zoneFlag codes don't distinguish
@@ -410,6 +455,7 @@ public sealed class F125TelemetrySource : ITelemetrySource
             PlayerTireCompound = _playerTireCompound,
             CarAheadTireCompound = _carAheadTireCompound,
             TrackFlag = _trackFlagF1,
+            TrackName = _trackNameF1,
         };
 
         SampleReceived?.Invoke(sample);

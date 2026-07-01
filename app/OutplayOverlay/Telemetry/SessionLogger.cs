@@ -83,6 +83,7 @@ public sealed class SessionLogger : IDisposable
     private float _brakeSum;
     private int _sampleCount;
     private float? _lastDeltaToBest;
+    private string? _currentTrackName; // first non-null TelemetrySample.TrackName seen this session
 
     /// <summary>Raised once a session ends (sim disconnect or Dispose) and its summary has been
     /// computed from durably-committed rows. Raised from the background writer task/thread, not
@@ -96,6 +97,13 @@ public sealed class SessionLogger : IDisposable
     private sealed record StartSessionJob(Guid LogicalSessionId, string Sim, DateTime StartUtc) : WriteJob;
     private sealed record LapJob(Guid LogicalSessionId, LapRecord Lap) : WriteJob;
     private sealed record EndSessionJob(Guid LogicalSessionId, string Sim, DateTime StartUtc, DateTime EndUtc) : WriteJob;
+
+    /// <summary>Enqueued the first time a sample with a non-null TrackName arrives for the
+    /// current logical session (iRacing/F1 25 both only learn the track name asynchronously,
+    /// after the session-start signal already fired — see IRacingTelemetrySource /
+    /// F125TelemetrySource) — updates the already-inserted Sessions row rather than trying to
+    /// have it at INSERT time.</summary>
+    private sealed record UpdateTrackNameJob(Guid LogicalSessionId, string TrackName) : WriteJob;
 
     public SessionLogger(TelemetryHub hub, string? dbPathOverride = null)
     {
@@ -136,7 +144,8 @@ public sealed class SessionLogger : IDisposable
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 Sim TEXT NOT NULL,
                 StartUtc TEXT NOT NULL,
-                EndUtc TEXT
+                EndUtc TEXT,
+                TrackName TEXT
             );
 
             CREATE TABLE IF NOT EXISTS Laps (
@@ -150,6 +159,34 @@ public sealed class SessionLogger : IDisposable
             );
             """;
         cmd.ExecuteNonQuery();
+
+        // MIGRATION SAFETY NET: "CREATE TABLE IF NOT EXISTS" above does nothing for a Sessions
+        // table that already exists on disk from before this change (no TrackName column) — an
+        // existing user's sessions.db would otherwise silently lack the column and every query
+        // referencing Sessions.TrackName below would throw. There is still no real migration
+        // framework (per the original schema comment), so this is a minimal, additive,
+        // idempotent guard: check pragma table_info and ALTER TABLE ADD COLUMN only if missing.
+        using var pragmaCmd = conn.CreateCommand();
+        pragmaCmd.CommandText = "PRAGMA table_info(Sessions);";
+        var hasTrackNameColumn = false;
+        using (var pragmaReader = pragmaCmd.ExecuteReader())
+        {
+            while (pragmaReader.Read())
+            {
+                if (string.Equals(pragmaReader.GetString(1), "TrackName", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasTrackNameColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasTrackNameColumn)
+        {
+            using var alterCmd = conn.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE Sessions ADD COLUMN TrackName TEXT;";
+            alterCmd.ExecuteNonQuery();
+        }
     }
 
     private void OnConnectionChanged(string simName, bool connected)
@@ -186,6 +223,7 @@ public sealed class SessionLogger : IDisposable
         _sessionStartUtc = DateTime.UtcNow;
         _currentSim = simName;
         _currentSessionId = Guid.NewGuid();
+        _currentTrackName = null;
         ResetLapAccumulator();
 
         _writeChannel.Writer.TryWrite(new StartSessionJob(_currentSessionId.Value, simName, _sessionStartUtc));
@@ -244,6 +282,16 @@ public sealed class SessionLogger : IDisposable
             _brakeSum += sample.Brake;
             _sampleCount++;
             if (sample.DeltaToBestSec is float delta) _lastDeltaToBest = delta;
+
+            // Track name arrives asynchronously (iRacing: after session-info YAML first parses;
+            // F1 25: after the first Session packet) — session-start has already fired and
+            // enqueued the StartSessionJob by the time this is known, so record it once here and
+            // enqueue a non-blocking UPDATE rather than trying to have it at INSERT time.
+            if (_currentTrackName is null && sample.TrackName is string trackName)
+            {
+                _currentTrackName = trackName;
+                _writeChannel.Writer.TryWrite(new UpdateTrackNameJob(logicalId, trackName));
+            }
         }
         // No SQLite connection, no disk I/O, and `_lock` has already been released by the time
         // this method returns — the only "work" done above besides arithmetic is a non-blocking
@@ -304,6 +352,13 @@ public sealed class SessionLogger : IDisposable
                         }
                         break;
 
+                    case UpdateTrackNameJob trackJob:
+                        if (logicalToRealSessionId.TryGetValue(trackJob.LogicalSessionId, out var sessionIdForTrack))
+                        {
+                            ExecuteUpdateTrackName(sessionIdForTrack, trackJob.TrackName);
+                        }
+                        break;
+
                     case EndSessionJob end:
                         if (logicalToRealSessionId.TryGetValue(end.LogicalSessionId, out var sessionIdForEnd))
                         {
@@ -359,6 +414,17 @@ public sealed class SessionLogger : IDisposable
         cmd.Parameters.AddWithValue("$delta", (object?)lap.DeltaToBestSec ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$avgThrottle", lap.AvgThrottle);
         cmd.Parameters.AddWithValue("$avgBrake", lap.AvgBrake);
+        cmd.ExecuteNonQuery();
+    }
+
+    private void ExecuteUpdateTrackName(long sessionId, string trackName)
+    {
+        using var conn = new SqliteConnection(ConnectionString);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE Sessions SET TrackName = $track WHERE Id = $id";
+        cmd.Parameters.AddWithValue("$track", trackName);
+        cmd.Parameters.AddWithValue("$id", sessionId);
         cmd.ExecuteNonQuery();
     }
 

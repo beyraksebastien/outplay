@@ -11,21 +11,24 @@ public sealed record SessionBestLap
 }
 
 /// <summary>
-/// Cross-session trend for a given sim. TRACK-COLUMN GAP (flagged, not resolved in this change):
-/// neither SessionLogger's Sessions table nor TelemetrySample carries a track/circuit identifier
-/// today — iRacing's adapter never parses session-info YAML (where track name would live) and F1
-/// 25's adapter never parses the Session packet's m_trackId (only trackLength was added here, for
-/// Feature 1's LapDistancePct). Adding a real per-track column is therefore NOT the "cheap wiring
-/// fix" it might look like: it needs a new sim-specific extraction path in each adapter plus a
-/// schema/migration decision (SessionLogger's schema comment already says there's no migration
-/// framework yet, "for now CREATE TABLE IF NOT EXISTS is sufficient since the shape hasn't shipped
-/// to users yet" — adding a nullable Track column later, once one adapter fills it in, is exactly
-/// the kind of additive change that comment anticipates). Given that, this is intentionally scoped
-/// as a v1 limitation: trends below are SIM-WIDE (all tracks pooled together for that sim), not
-/// per-track. If the user only ever practices one track per sim this is a distinction without a
-/// difference; if they hop tracks, "your best lap improved" is comparing apples across circuits,
-/// which is misleading — surfacing this in the UI (e.g. "trends are sim-wide until per-track
-/// tracking ships") is a frontend follow-up, not something this query layer can silently fix.
+/// Cross-session trend for a given sim, optionally narrowed to a single track.
+///
+/// TRACK-COLUMN GAP: CLOSED. Both adapters now populate TelemetrySample.TrackName
+/// (IRacingTelemetrySource parses WeekendInfo:TrackDisplayName from session-info YAML;
+/// F125TelemetrySource maps PacketSessionData's m_trackId through a lookup table — see each
+/// file's doc comments for the unverified assumptions behind those extractions), and
+/// SessionLogger persists it to a new nullable Sessions.TrackName column (added via an additive
+/// ALTER TABLE guard so existing sessions.db files upgrade in place — see SessionLogger's
+/// InitializeSchema doc comment).
+///
+/// BACKWARD COMPATIBILITY: <paramref name="GetTrend"/>'s new <c>track</c> parameter defaults to
+/// null, which preserves the exact old sim-wide behavior (all tracks pooled together) — existing
+/// callers (TrendsWindow.xaml.cs calls GetTrend("iRacing") / GetTrend("F1_25") with no other args)
+/// keep working unchanged. Passing a non-null track additionally filters to
+/// Sessions.TrackName = track, so "your best lap improved" becomes an apples-to-apples comparison
+/// for that circuit specifically. Sessions logged before this change (or where the sim/car
+/// combination never yielded a parseable track name) have a NULL TrackName and are excluded from
+/// any track-filtered query — they still count toward the sim-wide (track = null) view.
 /// </summary>
 public sealed record TrendResult
 {
@@ -73,12 +76,19 @@ public static class HistoryQueryService
     /// SessionSummaryGenerator returning null laps/using deadbands elsewhere.
     /// </summary>
     /// <param name="sim">Sim name exactly as SessionLogger records it (e.g. "iRacing", "F1_25").</param>
+    /// <param name="track">Optional track name (must match Sessions.TrackName exactly, e.g.
+    /// "Spa" or "Silverstone" as extracted by the corresponding adapter). When null (default),
+    /// preserves the original sim-wide behavior — all sessions for this sim are pooled regardless
+    /// of track, including sessions with a NULL TrackName (pre-upgrade data or a session where the
+    /// track name was never successfully parsed). When non-null, only sessions whose TrackName
+    /// exactly matches are included; sessions with a NULL TrackName are excluded from a
+    /// track-filtered query since we can't confirm they match.</param>
     /// <param name="recentSessionCount">How many of the most recent sessions to include in
     /// RecentSessionBests / the RecentTrend comparison. Default 10 is an arbitrary but reasonable
     /// "last handful of sessions" window; callers needing more history can pass a larger value.</param>
     /// <param name="dbPathOverride">For tests; production callers should omit this and use
     /// SessionLogger's default path.</param>
-    public static TrendResult? GetTrend(string sim, int recentSessionCount = 10, string? dbPathOverride = null)
+    public static TrendResult? GetTrend(string sim, string? track = null, int recentSessionCount = 10, string? dbPathOverride = null)
     {
         if (recentSessionCount < 1) recentSessionCount = 1;
 
@@ -88,10 +98,10 @@ public static class HistoryQueryService
         // Only completed sessions (EndUtc IS NOT NULL) count — an in-progress session's laps are
         // still being accumulated and its "best lap" could still improve mid-session, which would
         // make an in-progress session a moving target for a trend computation.
-        var sessionBests = LoadSessionBests(connectionString, sim);
+        var sessionBests = LoadSessionBests(connectionString, sim, track);
         if (sessionBests.Count == 0) return null;
 
-        var totalLaps = LoadTotalLapCount(connectionString, sim);
+        var totalLaps = LoadTotalLapCount(connectionString, sim, track);
 
         var overallBest = sessionBests.Min(s => s.BestLapTimeSec);
         var firstSessionBest = sessionBests[0].BestLapTimeSec; // list is ordered oldest-first
@@ -113,7 +123,7 @@ public static class HistoryQueryService
         };
     }
 
-    private static List<SessionBestLap> LoadSessionBests(string connectionString, string sim)
+    private static List<SessionBestLap> LoadSessionBests(string connectionString, string sim, string? track)
     {
         var results = new List<SessionBestLap>();
 
@@ -125,10 +135,12 @@ public static class HistoryQueryService
             FROM Sessions
             JOIN Laps ON Laps.SessionId = Sessions.Id
             WHERE Sessions.Sim = $sim AND Sessions.EndUtc IS NOT NULL
+                AND ($track IS NULL OR Sessions.TrackName = $track)
             GROUP BY Sessions.Id
             ORDER BY Sessions.StartUtc ASC;
             """;
         cmd.Parameters.AddWithValue("$sim", sim);
+        cmd.Parameters.AddWithValue("$track", (object?)track ?? DBNull.Value);
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -144,7 +156,7 @@ public static class HistoryQueryService
         return results;
     }
 
-    private static int LoadTotalLapCount(string connectionString, string sim)
+    private static int LoadTotalLapCount(string connectionString, string sim, string? track)
     {
         using var conn = new SqliteConnection(connectionString);
         conn.Open();
@@ -153,9 +165,11 @@ public static class HistoryQueryService
             SELECT COUNT(*)
             FROM Laps
             JOIN Sessions ON Sessions.Id = Laps.SessionId
-            WHERE Sessions.Sim = $sim AND Sessions.EndUtc IS NOT NULL;
+            WHERE Sessions.Sim = $sim AND Sessions.EndUtc IS NOT NULL
+                AND ($track IS NULL OR Sessions.TrackName = $track);
             """;
         cmd.Parameters.AddWithValue("$sim", sim);
+        cmd.Parameters.AddWithValue("$track", (object?)track ?? DBNull.Value);
         return (int)(long)cmd.ExecuteScalar()!;
     }
 
