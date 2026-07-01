@@ -53,7 +53,7 @@
 
             <!-- Debrief notification pill: hidden until SessionLogger.SummaryReady fires
                  (see MainWindow.xaml.cs OnSummaryReady). Persists until clicked or superseded
-                 by a newer summary — no auto-hide timer. -->
+                 by a newer summary - no auto-hide timer. -->
             <Border x:Name="DebriefPill" Visibility="Collapsed" Background="#33101010"
                     BorderBrush="#444" BorderThickness="1" CornerRadius="10" Padding="8,4"
                     Margin="0,0,0,8" Cursor="Hand" MouseLeftButtonUp="DebriefPill_Click">
