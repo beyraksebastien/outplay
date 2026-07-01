@@ -6,6 +6,9 @@ hand-written fake migration file would silently drift from whatever EF Core's ac
 would produce (model snapshot format, designer file, etc.) and is more likely to cause a confusing
 failure than a missing-migration error is.
 
+See `../DEPLOY.md` for the full step-by-step deployment guide (Render for the API + Neon for the
+free, non-expiring Postgres database). The summary below covers just the migration step.
+
 ## What you need to do on your Windows machine (or any machine with the .NET 8 SDK) before first deploy
 
 1. Restore packages once: `dotnet restore` from `services/ExpertLapApi/`.
