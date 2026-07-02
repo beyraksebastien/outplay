@@ -112,7 +112,29 @@ public sealed class F125TelemetrySource : ITelemetrySource
     public void Start()
     {
         _cts = new CancellationTokenSource();
-        _client = new UdpClient(Port);
+
+        try
+        {
+            _client = new UdpClient(Port);
+        }
+        catch (SocketException ex)
+        {
+            // Binding UDP port 20777 fails if another process already holds it - most commonly a
+            // leftover instance of this same app still running from a prior crash/interrupted run.
+            // This must NOT crash the whole app (it did: this constructor-time failure previously
+            // propagated all the way up through MainWindow's constructor as an unhandled
+            // XamlParseException, killing the process before the overlay window ever appeared,
+            // even though iRacing's adapter was perfectly fine and could have worked on its own).
+            // Degrade instead: log it, leave this source permanently "not connected", and let
+            // TelemetryHub/MainWindow keep working with whatever sources DID start successfully.
+            System.Diagnostics.Debug.WriteLine(
+                $"[F125TelemetrySource] Failed to bind UDP port {Port}: {ex.Message}. " +
+                "F1 25 telemetry will be unavailable this run (another process likely already " +
+                "holds this port - check for a leftover OutplayOverlay.exe in Task Manager).");
+            _client = null;
+            return;
+        }
+
         _ = ListenLoopAsync(_cts.Token);
     }
 
